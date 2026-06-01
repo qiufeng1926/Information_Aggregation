@@ -19,6 +19,13 @@ def get_collection_config(_: CurrentUser):
     return ResponseBase(data=CollectionService.check_environment())
 
 
+@router.get("/filter-options", response_model=ResponseBase[dict])
+def get_filter_options(_: CurrentUser):
+    from app.constants.xingtu_filters import get_filter_options
+
+    return ResponseBase(data=get_filter_options())
+
+
 @router.post("/tasks", response_model=ResponseBase[CollectionTaskOut], status_code=status.HTTP_201_CREATED)
 def create_collection_task(db: DbSession, user: CurrentUser, data: CollectionTaskCreate):
     try:

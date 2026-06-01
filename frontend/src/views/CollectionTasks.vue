@@ -64,40 +64,41 @@
       />
     </div>
 
-    <el-dialog v-model="showCreate" title="发起采集任务" width="520px">
-      <el-form :model="form" label-width="100px">
-        <el-form-item label="平台" required>
-          <el-select v-model="form.platform" style="width: 100%">
-            <el-option label="抖音" value="douyin" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="关键词" required>
-          <el-input v-model="form.keyword" placeholder="例如：吃播、美妆、探店" />
-        </el-form-item>
-        <el-form-item label="粉丝下限">
-          <el-input-number v-model="form.follower_min" :min="0" :step="10000" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="粉丝上限">
-          <el-input-number v-model="form.follower_max" :min="0" :step="10000" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="采集数量">
-          <el-input-number v-model="form.limit" :min="1" :max="200" style="width: 100%" />
-        </el-form-item>
+    <el-dialog v-model="showCreate" title="发起采集任务" width="860px" top="4vh" destroy-on-close>
+      <el-form :model="form" label-width="72px" class="create-form">
+        <el-row :gutter="16">
+          <el-col :span="8">
+            <el-form-item label="平台" required>
+              <el-select v-model="form.platform" style="width: 100%">
+                <el-option label="抖音" value="douyin" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="16">
+            <el-form-item label="关键词" required>
+              <el-input v-model="form.keyword" placeholder="例如：吃播、美妆、探店" />
+            </el-form-item>
+          </el-col>
+        </el-row>
       </el-form>
-      <p class="tip">
-        当前采集模式：<el-tag size="small">{{ collectorMode }}</el-tag>
-        <el-tag size="small" :type="playwrightReady ? 'success' : 'danger'" style="margin-left: 8px">
-          {{ playwrightReady ? '环境就绪' : '环境未就绪' }}
-        </el-tag>
-        <el-tag v-if="storageConfigured" size="small" type="success" style="margin-left: 8px">登录态 OK</el-tag>
-      </p>
-      <p v-if="backendPython" class="tip python-path">后端 Python：{{ backendPython }}</p>
-      <p v-if="envHint" class="warn tip">{{ envHint }}</p>
-      <p v-if="envHint && envHint.includes('重启')" class="warn tip">
-        安装 Playwright 后必须<strong>重启后端</strong>（Ctrl+C 停止 uvicorn，再重新运行）。
-      </p>
-      <p class="tip">脚本将通过 Playwright 自动登录星图，按关键词搜索、筛选达人，结果进入待审核列表。</p>
+
+      <div class="section-title">筛选条件（默认不限）</div>
+      <CollectionFilterPanel v-model="filterForm" />
+
+      <div class="env-info">
+        <p class="tip">
+          当前采集模式：<el-tag size="small">{{ collectorMode }}</el-tag>
+          <el-tag size="small" :type="playwrightReady ? 'success' : 'danger'" style="margin-left: 8px">
+            {{ playwrightReady ? '环境就绪' : '环境未就绪' }}
+          </el-tag>
+          <el-tag v-if="storageConfigured" size="small" type="success" style="margin-left: 8px">登录态 OK</el-tag>
+        </p>
+        <p v-if="backendPython" class="tip python-path">后端 Python：{{ backendPython }}</p>
+        <p v-if="envHint" class="warn tip">{{ envHint }}</p>
+        <p class="tip">Playwright 将自动在星图页面应用所选筛选，结果进入待审核列表。</p>
+      </div>
       <template #footer>
+        <el-button @click="resetCreateForm">重置筛选</el-button>
         <el-button @click="showCreate = false">取消</el-button>
         <el-button type="primary" :loading="creating" @click="handleCreate">开始采集</el-button>
       </template>
@@ -118,6 +119,12 @@ import {
   type CollectionTask,
 } from '@/api/collection'
 import request, { type ApiResponse } from '@/api/request'
+import CollectionFilterPanel from '@/components/CollectionFilterPanel.vue'
+import {
+  buildFiltersPayload,
+  createEmptyFilters,
+  type CollectionFilters,
+} from '@/constants/collectionFilters'
 
 const collectorMode = ref('browser')
 const storageConfigured = ref(false)
@@ -137,10 +144,14 @@ const pagination = reactive({ page: 1, page_size: 20, total: 0 })
 const form = reactive({
   platform: 'douyin',
   keyword: '',
-  follower_min: undefined as number | undefined,
-  follower_max: undefined as number | undefined,
-  limit: 30,
 })
+
+const filterForm = ref<CollectionFilters>(createEmptyFilters())
+
+function resetCreateForm() {
+  form.keyword = ''
+  filterForm.value = createEmptyFilters()
+}
 
 function formatTime(value: string) {
   return value?.replace('T', ' ').slice(0, 19)
@@ -195,15 +206,11 @@ async function handleCreate() {
     await createCollectionTask({
       platform: form.platform,
       keyword: form.keyword.trim(),
-      filters: {
-        follower_min: form.follower_min,
-        follower_max: form.follower_max,
-        limit: form.limit,
-      },
+      filters: buildFiltersPayload(filterForm.value),
     })
     ElMessage.success('采集任务已启动')
     showCreate.value = false
-    form.keyword = ''
+    resetCreateForm()
     loadData()
   } finally {
     creating.value = false
@@ -262,5 +269,22 @@ onUnmounted(() => {
 .error-msg {
   color: #f56c6c;
   font-size: 12px;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin: 8px 0 12px;
+}
+
+.create-form {
+  margin-bottom: 4px;
+}
+
+.env-info {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #ebeef5;
 }
 </style>

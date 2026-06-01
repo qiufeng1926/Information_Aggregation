@@ -2,6 +2,7 @@ import logging
 import random
 
 from app.collectors.base import BaseCollector, RawInfluencer, SearchFilters
+from app.collectors.filter_utils import passes_search_filters
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -89,7 +90,7 @@ class DouyinCollector(BaseCollector):
                     "quote_range": item.get("quote_range"),
                 },
             )
-            if self._passes_filters(raw, filters):
+            if passes_search_filters(raw, filters):
                 results.append(raw)
         return results[: filters.limit]
 
@@ -121,18 +122,8 @@ class DouyinCollector(BaseCollector):
                 match_score=round(random.uniform(60, 95), 2),
                 extra_data={"content_type": keyword, "mock": True},
             )
-            if self._passes_filters(raw, filters):
+            if passes_search_filters(raw, filters):
                 results.append(raw)
 
         results.sort(key=lambda x: x.match_score, reverse=True)
         return results
-
-    @staticmethod
-    def _passes_filters(raw: RawInfluencer, filters: SearchFilters) -> bool:
-        if filters.follower_min and raw.follower_count < filters.follower_min:
-            return False
-        if filters.follower_max and raw.follower_count > filters.follower_max:
-            return False
-        if filters.avg_views_min and (raw.avg_views or 0) < filters.avg_views_min:
-            return False
-        return True

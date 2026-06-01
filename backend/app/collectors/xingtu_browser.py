@@ -9,6 +9,8 @@ from urllib.parse import quote
 
 from app.collectors.base import RawInfluencer, SearchFilters
 from app.config import settings
+from app.constants.xingtu_filters import PAGE_FILTER_LABELS
+from app.collectors.filter_utils import passes_search_filters
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +88,7 @@ class XingtuBrowserCollector:
                         "星图未登录或 Cookie 已过期。请运行: python scripts/save_xingtu_session.py"
                     )
 
+                self._apply_page_filters(page, filters)
                 self._perform_search(page, keyword)
                 page.wait_for_timeout(settings.PLAYWRIGHT_WAIT_AFTER_SEARCH)
 
@@ -189,6 +192,64 @@ class XingtuBrowserCollector:
         page.goto(XINGTU_SEARCH_URL.format(keyword=quote(keyword)), wait_until="domcontentloaded")
         page.wait_for_timeout(2000)
 
+    def _apply_page_filters(self, page, filters: SearchFilters) -> None:
+        """在星图页面上点击对应筛选项（默认「不限」则跳过）"""
+        applied: list[str] = []
+
+        for field_key, row_label in PAGE_FILTER_LABELS.items():
+            value = getattr(filters, field_key, None)
+            if value and self._click_filter_tag(page, row_label, str(value)):
+                applied.append(f"{row_label}={value}")
+                page.wait_for_timeout(800)
+
+        if filters.theme_tags:
+            for tag in filters.theme_tags:
+                if self._click_checkbox_option(page, tag):
+                    applied.append(f"主题={tag}")
+                    page.wait_for_timeout(500)
+
+        if applied:
+            logger.info("Applied Xingtu page filters: %s", ", ".join(applied))
+            page.wait_for_timeout(1500)
+
+    @staticmethod
+    def _click_filter_tag(page, row_label: str, option: str) -> bool:
+        if not option or option == "不限":
+            return False
+        try:
+            label = page.get_by_text(row_label, exact=True).first
+            if not label.is_visible(timeout=1500):
+                return False
+            row = label.locator(
+                "xpath=ancestor::*[contains(@class,'filter') or contains(@class,'row') "
+                "or contains(@class,'item') or contains(@class,'line')][1]"
+            )
+            tag = row.get_by_text(option, exact=True).first
+            if tag.is_visible(timeout=1500):
+                tag.click()
+                return True
+        except Exception:
+            pass
+        try:
+            tag = page.get_by_text(option, exact=True).first
+            if tag.is_visible(timeout=1000):
+                tag.click()
+                return True
+        except Exception:
+            pass
+        return False
+
+    @staticmethod
+    def _click_checkbox_option(page, label: str) -> bool:
+        try:
+            item = page.get_by_text(label, exact=True).first
+            if item.is_visible(timeout=1500):
+                item.click()
+                return True
+        except Exception:
+            pass
+        return False
+
     @staticmethod
     def _parse_dom(page) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
@@ -234,7 +295,7 @@ class XingtuBrowserCollector:
         results: list[RawInfluencer] = []
         for item in items:
             raw = self._map_item(keyword, item)
-            if raw and self._passes_filters(raw, filters):
+            if raw and passes_search_filters(raw, filters):
                 results.append(raw)
         results.sort(key=lambda x: x.match_score, reverse=True)
         return results
@@ -286,16 +347,6 @@ class XingtuBrowserCollector:
                 "xingtu_raw": {k: v for k, v in extra.items() if not str(k).startswith("_")},
             },
         )
-
-    @staticmethod
-    def _passes_filters(raw: RawInfluencer, filters: SearchFilters) -> bool:
-        if filters.follower_min and raw.follower_count < filters.follower_min:
-            return False
-        if filters.follower_max and raw.follower_count > filters.follower_max:
-            return False
-        if filters.avg_views_min and (raw.avg_views or 0) < filters.avg_views_min:
-            return False
-        return True
 
 
 def _load_cookies() -> list[dict]:

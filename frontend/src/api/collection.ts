@@ -1,11 +1,7 @@
 import request, { type ApiResponse, type PageResult } from './request'
+import type { CollectionFilters } from '@/constants/collectionFilters'
 
-export interface CollectionFilters {
-  follower_min?: number
-  follower_max?: number
-  avg_views_min?: number
-  limit?: number
-}
+export type { CollectionFilters }
 
 export interface CollectionTask {
   id: number

@@ -36,12 +36,7 @@ def main():
         db.commit()
 
         filters_data = task.filters or {}
-        search_filters = SearchFilters(
-            follower_min=filters_data.get("follower_min"),
-            follower_max=filters_data.get("follower_max"),
-            avg_views_min=filters_data.get("avg_views_min"),
-            limit=filters_data.get("limit", 50),
-        )
+        search_filters = SearchFilters.from_dict(filters_data)
 
         collector = get_collector(task.platform)
         results = collector.search(keyword=task.keyword, filters=search_filters)

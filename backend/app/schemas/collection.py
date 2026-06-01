@@ -4,10 +4,43 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class CollectionFilters(BaseModel):
+    """星图采集筛选条件，各字段默认空/None 表示「不限」"""
+
+    # 合作诉求
+    cooperation_purpose: str | None = None
+    incentive_method: str | None = None
+    cooperation_form: str | None = None
+    creator_level: str | None = None
+
+    # 达人配置
+    creator_type: str | None = None
+    follower_tier: str | None = None
+    content_theme: str | None = None
+    creator_gender: str | None = None
+    follower_gender: str | None = None
+    follower_age: str | None = None
+    verified: str | None = None
+
+    # 数据指标
     follower_min: int | None = None
     follower_max: int | None = None
     avg_views_min: int | None = None
-    limit: int = Field(default=50, ge=1, le=200)
+    interaction_rate_min: float | None = None
+
+    # 性价比
+    quote_duration: str | None = None
+    quote_min: int | None = None
+    quote_max: int | None = None
+    expected_play_min: int | None = None
+    expected_cpm_max: float | None = None
+    expected_cpe_max: float | None = None
+    completion_rate_min: float | None = None
+
+    # 主题推荐（多选）
+    theme_tags: list[str] | None = None
+
+    # 采集数量
+    limit: int = Field(default=30, ge=1, le=200)
 
 
 class CollectionTaskCreate(BaseModel):
