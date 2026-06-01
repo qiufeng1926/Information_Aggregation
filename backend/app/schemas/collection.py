@@ -97,6 +97,13 @@ class CollectedInfluencerOut(BaseModel):
     match_score: float | None
     extra_data: dict | None
     mcn_name: str | None = None
+    short_id: str | None = None
+    city: str | None = None
+    contact_phone: str | None = None
+    contact_wechat: str | None = None
+    content_styles: list[str] = []
+    xingtu_homepage: str | None = None
+    douyin_homepage: str | None = None
     review_status: str
     influencer_id: int | None
     in_library: bool = False

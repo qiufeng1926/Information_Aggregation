@@ -12,13 +12,22 @@ from app.config import settings
 from app.constants.xingtu_filters import PAGE_FILTER_LABELS
 from app.collectors.filter_utils import passes_search_filters
 from app.utils.mcn_utils import extract_mcn_name
+from app.utils.xingtu_fields import (
+    build_xingtu_homepage,
+    choose_best_profile_url,
+    merge_author_items,
+    needs_detail_enrichment,
+    parse_dom_text_fields,
+    parse_xingtu_item,
+    _pick_star_id,
+)
 
 logger = logging.getLogger(__name__)
 
 XINGTU_MARKET_URL = "https://www.xingtu.cn/ad/creator/market"
 XINGTU_SEARCH_URL = "https://www.xingtu.cn/ad/creator/market?keyword={keyword}"
 
-AUTHOR_ID_KEYS = ("author_id", "star_id", "uid", "user_id", "core_user_id", "id")
+AUTHOR_ID_KEYS = ("author_id", "star_id", "uid", "user_id", "core_user_id")
 NICKNAME_KEYS = ("nick_name", "nickname", "author_name", "name", "unique_id")
 FOLLOWER_KEYS = ("follower_count", "follower", "fans_num", "fans_count", "follower_num")
 AVATAR_KEYS = ("avatar_uri", "avatar_url", "avatar", "head_image")
@@ -33,6 +42,10 @@ INTERCEPT_URL_KEYWORDS = (
     "star",
     "kol",
     "talent",
+    "detail",
+    "homepage",
+    "profile",
+    "info",
 )
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
@@ -65,7 +78,7 @@ class XingtuBrowserCollector:
         except ImportError as exc:
             raise RuntimeError("请先安装 Playwright: pip install playwright && playwright install chromium") from exc
 
-        captured: list[dict[str, Any]] = []
+        authors: dict[str, dict[str, Any]] = {}
         seen_ids: set[str] = set()
 
         def on_response(response) -> None:
@@ -82,10 +95,14 @@ class XingtuBrowserCollector:
             try:
                 data = response.json()
                 for item in _extract_author_items(data):
-                    uid = _pick(item, AUTHOR_ID_KEYS)
-                    if uid and uid not in seen_ids:
-                        seen_ids.add(uid)
-                        captured.append(item)
+                    uid = str(_pick(item, AUTHOR_ID_KEYS) or "")
+                    if not uid:
+                        continue
+                    seen_ids.add(uid)
+                    if uid in authors:
+                        authors[uid] = merge_author_items(authors[uid], item)
+                    else:
+                        authors[uid] = item
             except Exception:
                 pass
 
@@ -118,13 +135,17 @@ class XingtuBrowserCollector:
                     page.evaluate("window.scrollBy(0, window.innerHeight)")
                     page.wait_for_timeout(1500)
 
-                if len(captured) < filters.limit:
+                if len(authors) < filters.limit:
                     dom_items = self._parse_dom(page)
                     for item in dom_items:
-                        uid = item.get("platform_uid", "")
+                        uid = str(item.get("author_id") or item.get("platform_uid") or "")
                         if uid and uid not in seen_ids:
                             seen_ids.add(uid)
-                            captured.append(item)
+                            authors[uid] = item
+                        elif uid and uid in authors:
+                            authors[uid] = merge_author_items(authors[uid], item)
+
+                self._enrich_from_detail_pages(page, authors, filters.limit)
             except Exception as exc:
                 shot = _save_failure_screenshot(page, keyword)
                 if shot:
@@ -135,6 +156,7 @@ class XingtuBrowserCollector:
                 context.close()
                 browser.close()
 
+        captured = list(authors.values())
         results = self._to_raw_influencers(keyword, captured, filters)
         logger.info("Xingtu Playwright collect done: keyword=%s, count=%d", keyword, len(results))
 
@@ -276,6 +298,39 @@ class XingtuBrowserCollector:
         return False
 
     @staticmethod
+    def _enrich_from_detail_pages(
+        page,
+        authors: dict[str, dict[str, Any]],
+        limit: int,
+        max_visits: int = 12,
+    ) -> None:
+        """访问星图达人主页，补全联系方式、互动率等详情字段"""
+        candidates: list[tuple[str, dict[str, Any]]] = []
+        for uid, item in authors.items():
+            parsed = parse_xingtu_item(item)
+            if needs_detail_enrichment(parsed):
+                candidates.append((uid, item))
+
+        visited = 0
+        for uid, item in candidates[:max_visits]:
+            if visited >= max_visits or len(authors) >= limit * 2:
+                break
+            star_id = _pick_star_id(item) or (
+                uid if uid and str(uid).isdigit() and len(str(uid)) >= 11 else None
+            )
+            if not star_id:
+                continue
+            detail_url = build_xingtu_homepage(star_id)
+            if not detail_url:
+                continue
+            try:
+                page.goto(detail_url, wait_until="domcontentloaded", timeout=settings.PLAYWRIGHT_TIMEOUT)
+                page.wait_for_timeout(1800)
+                visited += 1
+            except Exception:
+                logger.debug("Detail page enrich failed for %s", star_id, exc_info=True)
+
+    @staticmethod
     def _parse_dom(page) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         card_selectors = [
@@ -294,21 +349,29 @@ class XingtuBrowserCollector:
                     text = card.inner_text()
                     if not text.strip():
                         continue
+                    dom_fields = parse_dom_text_fields(text)
                     lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
                     nickname = lines[0] if lines else ""
                     follower_count = _parse_follower_from_text(text)
-                    uid_match = re.search(r"\d{8,}", text)
-                    platform_uid = uid_match.group() if uid_match else nickname
                     mcn_match = re.search(r"MCN[：:\s]+([^\n\r]+)", text, re.I)
+                    href = None
+                    try:
+                        link = card.query_selector("a[href]")
+                        if link:
+                            href = link.get_attribute("href")
+                    except Exception:
+                        pass
                     if nickname:
                         item: dict[str, Any] = {
                             "nick_name": nickname,
-                            "author_id": platform_uid,
                             "follower_count": follower_count,
                             "_dom": True,
+                            **dom_fields,
                         }
                         if mcn_match:
                             item["mcn_name"] = mcn_match.group(1).strip()
+                        if href and href.startswith("http"):
+                            item["homepage"] = href
                         items.append(item)
                 except Exception:
                     continue
@@ -344,7 +407,6 @@ class XingtuBrowserCollector:
             tag_names.insert(0, keyword)
 
         follower_count = _to_int(_pick(item, FOLLOWER_KEYS))
-        avg_views = _to_int(_pick(item, AVG_PLAY_KEYS))
 
         extra = {
             k: v
@@ -356,8 +418,21 @@ class XingtuBrowserCollector:
 
         xingtu_raw = {k: v for k, v in extra.items() if not str(k).startswith("_")}
         mcn_name = extract_mcn_name({**item, "xingtu_raw": xingtu_raw})
+        parsed = parse_xingtu_item({**item, "xingtu_raw": xingtu_raw})
+        for style in parsed.get("content_styles") or []:
+            if style and style not in tag_names:
+                tag_names.append(style)
+
+        profile_url = choose_best_profile_url(parsed, {**item, "xingtu_raw": xingtu_raw})
+        engagement_rate = parsed.get("engagement_rate")
+        if engagement_rate is None:
+            engagement_rate = _normalize_engagement_rate(
+                item.get("engagement_rate") or item.get("interact_rate")
+            )
+        avg_views = parsed.get("avg_views") or _to_int(_pick(item, AVG_PLAY_KEYS))
 
         extra_data: dict[str, Any] = {
+            "parsed": parsed,
             "recent_gmv": item.get("gmv_30d") or item.get("sale_amount"),
             "showcase_count": item.get("showcase_count") or item.get("product_count"),
             "quote_min": item.get("quote_min") or item.get("price_min"),
@@ -372,9 +447,9 @@ class XingtuBrowserCollector:
             platform_uid=platform_uid,
             nickname=nickname,
             avatar_url=_pick(item, AVATAR_KEYS),
-            profile_url=item.get("homepage") or item.get("profile_url"),
+            profile_url=profile_url,
             follower_count=follower_count,
-            engagement_rate=_to_float(item.get("engagement_rate") or item.get("interact_rate")),
+            engagement_rate=engagement_rate,
             avg_views=avg_views,
             source="xingtu",
             matched_tags=tag_names[:10],
@@ -438,8 +513,14 @@ def _extract_author_items(data: Any, depth: int = 0) -> list[dict]:
 def _looks_like_author(data: dict) -> bool:
     has_id = any(k in data for k in AUTHOR_ID_KEYS)
     has_name = any(k in data for k in NICKNAME_KEYS)
-    has_metric = any(k in data for k in FOLLOWER_KEYS + AVG_PLAY_KEYS)
-    return has_id and has_name and (has_metric or "avatar" in str(data.keys()).lower())
+    has_metric = any(
+        k in data
+        for k in FOLLOWER_KEYS
+        + AVG_PLAY_KEYS
+        + ("interact_rate", "engagement_rate", "interaction_rate")
+    )
+    has_profile = any(k in data for k in ("homepage", "profile_url", "sec_uid", "contact_phone"))
+    return has_id and (has_name or has_metric or has_profile)
 
 
 def _to_int(value: Any) -> int:
@@ -459,6 +540,26 @@ def _to_int(value: Any) -> int:
         return int(float(text) * multiplier)
     except ValueError:
         return 0
+
+
+def _normalize_engagement_rate(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip().replace("%", "")
+        try:
+            value = float(text)
+        except ValueError:
+            return None
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return None
+    if rate > 1:
+        rate = rate / 100
+    if rate < 0 or rate > 1:
+        return None
+    return round(rate, 4)
 
 
 def _to_float(value: Any) -> float | None:

@@ -14,6 +14,7 @@ from app.schemas import InfluencerCreate, InfluencerUpdate
 from app.services.agency_service import AgencyService
 from app.services.influencer_service import InfluencerService
 from app.services.tag_service import TagService
+from app.utils.xingtu_fields import build_profile_update_from_extra, merge_profile_patch
 from app.utils.filter_summary import build_filter_summary
 
 logger = logging.getLogger(__name__)
@@ -382,12 +383,14 @@ class CollectionService:
         task_ids: set[int] = set()
         for item in items:
             agency_id = AgencyService.resolve_agency_id(db, item.platform, item.extra_data)
+            profile_patch = build_profile_update_from_extra(item.extra_data)
             existing = InfluencerService.get_by_platform_uid(db, item.platform, item.platform_uid)
             if existing:
+                merged_profile = merge_profile_patch(existing.profile, profile_patch) if profile_patch else None
                 update_data = InfluencerUpdate(
                     nickname=item.nickname,
                     avatar_url=item.avatar_url,
-                    profile_url=item.profile_url,
+                    profile_url=item.profile_url or existing.profile_url,
                     follower_count=item.follower_count,
                     engagement_rate=float(item.engagement_rate) if item.engagement_rate else None,
                     source=item.source,
@@ -395,6 +398,8 @@ class CollectionService:
                 )
                 if agency_id is not None:
                     update_data.agency_id = agency_id
+                if merged_profile is not None:
+                    update_data.profile = merged_profile
                 InfluencerService.update(db, existing, update_data)
                 influencer_id = existing.id
             else:
@@ -414,6 +419,10 @@ class CollectionService:
                     ),
                 )
                 influencer_id = influencer.id
+                if profile_patch:
+                    inf = InfluencerService.get_by_id(db, influencer_id)
+                    if inf:
+                        InfluencerService.update(db, inf, InfluencerUpdate(profile=profile_patch))
 
             if item.matched_tags:
                 TagService.attach_tags(db, influencer_id, item.matched_tags, source="collect")

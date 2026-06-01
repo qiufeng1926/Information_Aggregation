@@ -14,6 +14,7 @@ from app.services.collection_service import CollectionService, ERROR_CATEGORY_LA
 from app.utils.access_control import is_admin
 from app.utils.filter_summary import build_filter_summary
 from app.utils.mcn_utils import extract_mcn_name
+from app.utils.xingtu_fields import parse_xingtu_item, _is_valid_profile_url
 
 router = APIRouter(prefix="/collection", tags=["自动采集"])
 
@@ -34,6 +35,29 @@ def _collected_out(item, library_map: dict[str, int] | None = None) -> Collected
         data.in_library = bool(item.extra_data.get("in_library"))
         data.existing_influencer_id = item.extra_data.get("existing_influencer_id")
     data.mcn_name = extract_mcn_name(item.extra_data)
+    extra = item.extra_data or {}
+    parsed = extra.get("parsed") or parse_xingtu_item(extra)
+    if parsed:
+        data.short_id = parsed.get("short_id")
+        data.city = parsed.get("city")
+        data.xingtu_homepage = parsed.get("xingtu_homepage")
+        data.douyin_homepage = parsed.get("douyin_homepage")
+        data.content_styles = parsed.get("content_styles") or []
+        contact = parsed.get("contact") or {}
+        data.contact_phone = contact.get("phone")
+        data.contact_wechat = contact.get("wechat")
+        if not data.profile_url:
+            candidate = parsed.get("profile_url")
+            if candidate and _is_valid_profile_url(str(candidate)):
+                data.profile_url = candidate
+        if data.profile_url and not _is_valid_profile_url(data.profile_url):
+            data.profile_url = None
+        xh = parsed.get("xingtu_homepage")
+        dh = parsed.get("douyin_homepage")
+        data.xingtu_homepage = xh if xh and _is_valid_profile_url(str(xh)) else None
+        data.douyin_homepage = dh if dh and _is_valid_profile_url(str(dh)) else None
+        if data.engagement_rate is None and parsed.get("engagement_rate") is not None:
+            data.engagement_rate = parsed.get("engagement_rate")
     return data
 
 

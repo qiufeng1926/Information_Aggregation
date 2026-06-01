@@ -46,6 +46,13 @@ export interface CollectedInfluencer {
   match_score: number | null
   extra_data: Record<string, unknown> | null
   mcn_name?: string | null
+  short_id?: string | null
+  city?: string | null
+  contact_phone?: string | null
+  contact_wechat?: string | null
+  content_styles?: string[]
+  xingtu_homepage?: string | null
+  douyin_homepage?: string | null
   review_status: string
   influencer_id: number | null
   in_library?: boolean

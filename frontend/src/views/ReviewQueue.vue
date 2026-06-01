@@ -54,6 +54,11 @@
           <el-tag type="success">{{ row.match_score }}分</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="互动率" width="90">
+        <template #default="{ row }">
+          {{ row.engagement_rate != null ? `${(row.engagement_rate * 100).toFixed(2)}%` : '-' }}
+        </template>
+      </el-table-column>
       <el-table-column label="MCN机构" width="130" show-overflow-tooltip>
         <template #default="{ row }">{{ row.mcn_name || '-' }}</template>
       </el-table-column>
@@ -99,17 +104,62 @@
 
         <el-descriptions :column="1" border size="small">
           <el-descriptions-item label="粉丝量">{{ formatFollowers(currentItem.follower_count) }}</el-descriptions-item>
+          <el-descriptions-item label="互动率">
+            {{
+              currentItem.engagement_rate != null
+                ? `${(currentItem.engagement_rate * 100).toFixed(2)}%`
+                : '-'
+            }}
+          </el-descriptions-item>
+          <el-descriptions-item label="平均播放" v-if="currentItem.avg_views">
+            {{ formatFollowers(currentItem.avg_views) }}
+          </el-descriptions-item>
           <el-descriptions-item label="匹配度">{{ currentItem.match_score }} 分</el-descriptions-item>
           <el-descriptions-item label="库内状态">
             <el-tag :type="currentItem.in_library ? 'warning' : 'success'">
               {{ currentItem.in_library ? '已存在于达人库' : '新达人' }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item v-if="rawData.city" label="城市">{{ rawData.city }}</el-descriptions-item>
-          <el-descriptions-item v-if="rawData.gender" label="性别">{{ formatGender(rawData.gender) }}</el-descriptions-item>
-          <el-descriptions-item v-if="rawData.short_id" label="抖音号">{{ rawData.short_id }}</el-descriptions-item>
+          <el-descriptions-item label="抖音号">
+            {{ currentItem.short_id || parsedData.short_id || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="城市">
+            {{ currentItem.city || parsedData.city || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="性别">
+            {{ formatGender(parsedData.gender) }}
+          </el-descriptions-item>
           <el-descriptions-item label="MCN机构">
             {{ currentItem.mcn_name || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="联系方式">
+            <span v-if="currentItem.contact_phone || currentItem.contact_wechat">
+              {{ currentItem.contact_phone ? `电话 ${currentItem.contact_phone}` : '' }}
+              {{ currentItem.contact_wechat ? `微信 ${currentItem.contact_wechat}` : '' }}
+            </span>
+            <span v-else>-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="视频风格">
+            <el-tag
+              v-for="style in currentItem.content_styles || []"
+              :key="style"
+              size="small"
+              style="margin-right: 4px"
+            >
+              {{ style }}
+            </el-tag>
+            <span v-if="!(currentItem.content_styles || []).length">-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="主页链接">
+            <a
+              v-if="profileLink"
+              :href="profileLink"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {{ profileLink }}
+            </a>
+            <span v-else>-</span>
           </el-descriptions-item>
           <el-descriptions-item label="标签">
             <el-tag v-for="tag in currentItem.matched_tags || []" :key="tag" size="small" style="margin-right: 4px">
@@ -156,14 +206,27 @@ const taskId = ref<number | undefined>(
 const showDrawer = ref(false)
 const currentItem = ref<CollectedInfluencer | null>(null)
 
-const rawData = computed(() => {
+const parsedData = computed(() => {
   const extra = currentItem.value?.extra_data as Record<string, unknown> | undefined
-  return (extra?.xingtu_raw as Record<string, string>) || {}
+  return (extra?.parsed as Record<string, string>) || {}
+})
+
+const profileLink = computed(() => {
+  const item = currentItem.value
+  if (!item) return ''
+  return (
+    item.profile_url ||
+    item.douyin_homepage ||
+    item.xingtu_homepage ||
+    (parsedData.value.profile_url as string) ||
+    ''
+  )
 })
 
 const pagination = reactive({ page: 1, page_size: 20, total: 0 })
 
-function formatGender(value: string) {
+function formatGender(value: string | undefined) {
+  if (!value) return '-'
   if (value === '1') return '男'
   if (value === '2') return '女'
   return value
