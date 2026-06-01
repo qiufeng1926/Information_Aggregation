@@ -19,6 +19,18 @@
           <el-icon><User /></el-icon>
           <span>达人库</span>
         </el-menu-item>
+        <el-menu-item index="/tags">
+          <el-icon><CollectionTag /></el-icon>
+          <span>标签管理</span>
+        </el-menu-item>
+        <el-menu-item index="/agencies">
+          <el-icon><OfficeBuilding /></el-icon>
+          <span>MCN机构</span>
+        </el-menu-item>
+        <el-menu-item index="/match">
+          <el-icon><Connection /></el-icon>
+          <span>智能匹配</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
 
@@ -50,6 +62,9 @@ const activeMenu = computed(() => {
   if (route.path.startsWith('/influencers')) return '/influencers'
   if (route.path.startsWith('/collection')) return '/collection'
   if (route.path.startsWith('/review')) return '/review'
+  if (route.path.startsWith('/tags')) return '/tags'
+  if (route.path.startsWith('/match')) return '/match'
+  if (route.path.startsWith('/agencies')) return '/agencies'
   return route.path
 })
 

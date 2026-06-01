@@ -6,6 +6,7 @@ from app.schemas import (
     InfluencerCreate,
     InfluencerFilter,
     InfluencerOut,
+    InfluencerProfileOut,
     InfluencerUpdate,
     PageResult,
     ResponseBase,
@@ -17,11 +18,32 @@ router = APIRouter(prefix="/influencers", tags=["达人管理"])
 
 
 def _to_out(influencer) -> InfluencerOut:
-    data = InfluencerOut.model_validate(influencer)
-    data.tags = [
-        TagBrief.model_validate(it.tag) for it in influencer.tags if it.tag is not None
-    ]
-    return data
+    tags = [TagBrief.model_validate(it.tag) for it in influencer.tags if it.tag is not None]
+    profile = (
+        InfluencerProfileOut.model_validate(influencer.profile)
+        if influencer.profile is not None
+        else None
+    )
+    engagement = influencer.engagement_rate
+    return InfluencerOut(
+        id=influencer.id,
+        platform=influencer.platform,
+        platform_uid=influencer.platform_uid,
+        nickname=influencer.nickname,
+        avatar_url=influencer.avatar_url,
+        profile_url=influencer.profile_url,
+        agency_id=influencer.agency_id,
+        follower_count=influencer.follower_count,
+        engagement_rate=float(engagement) if engagement is not None else None,
+        source=influencer.source,
+        status=influencer.status,
+        extra_data=influencer.extra_data,
+        created_at=influencer.created_at,
+        updated_at=influencer.updated_at,
+        tags=tags,
+        profile=profile,
+        agency_name=influencer.agency.name if influencer.agency else None,
+    )
 
 
 @router.get("", response_model=ResponseBase[PageResult[InfluencerOut]])
@@ -35,6 +57,8 @@ def list_influencers(
     keyword: str | None = None,
     follower_min: int | None = None,
     follower_max: int | None = None,
+    tag_ids: list[int] | None = Query(None),
+    agency_id: int | None = None,
     status: int | None = 1,
 ):
     filters = InfluencerFilter(
@@ -43,6 +67,8 @@ def list_influencers(
         keyword=keyword,
         follower_min=follower_min,
         follower_max=follower_max,
+        tag_ids=tag_ids,
+        agency_id=agency_id,
         status=status,
     )
     items, total = InfluencerService.list_influencers(db, filters, page, page_size)

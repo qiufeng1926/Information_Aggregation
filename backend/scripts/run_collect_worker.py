@@ -21,7 +21,7 @@ def main():
     from app.collectors.base import SearchFilters
     from app.collectors.registry import get_collector
     from app.database import SessionLocal
-    from app.models import CollectedInfluencer, CollectionTask
+    from app.models import CollectedInfluencer, CollectionTask, Influencer
 
     db = SessionLocal()
     try:
@@ -41,6 +41,11 @@ def main():
         collector = get_collector(task.platform)
         results = collector.search(keyword=task.keyword, filters=search_filters)
 
+        library_map = {
+            row.platform_uid: row.id
+            for row in db.query(Influencer).filter(Influencer.platform == task.platform).all()
+        }
+
         existing_uids = {
             r[0]
             for r in db.query(CollectedInfluencer.platform_uid)
@@ -55,6 +60,12 @@ def main():
         for item in results:
             if item.platform_uid in existing_uids:
                 continue
+
+            extra = dict(item.extra_data or {})
+            if item.platform_uid in library_map:
+                extra["in_library"] = True
+                extra["existing_influencer_id"] = library_map[item.platform_uid]
+
             db.add(
                 CollectedInfluencer(
                     task_id=task.id,
@@ -69,7 +80,7 @@ def main():
                     source=item.source,
                     matched_tags=item.matched_tags,
                     match_score=item.match_score,
-                    extra_data=item.extra_data,
+                    extra_data=extra or None,
                     review_status="pending",
                 )
             )
@@ -88,6 +99,7 @@ def main():
         if task:
             task.status = "failed"
             task.error_message = str(exc)
+            task.error_category = None
             task.completed_at = datetime.now()
             db.commit()
         print(json.dumps({"ok": False, "error": str(exc)}))

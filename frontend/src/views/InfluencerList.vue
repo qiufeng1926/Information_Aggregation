@@ -7,6 +7,29 @@
       <el-select v-model="filters.source" placeholder="来源" clearable style="width: 140px">
         <el-option v-for="item in SOURCE_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />
       </el-select>
+      <el-select
+        v-model="filters.tag_ids"
+        multiple
+        collapse-tags
+        collapse-tags-tooltip
+        placeholder="标签筛选"
+        clearable
+        filterable
+        style="width: 220px"
+      >
+        <el-option-group v-for="group in tagOptions" :key="group.label" :label="group.label">
+          <el-option v-for="tag in group.options" :key="tag.id" :label="tag.name" :value="tag.id" />
+        </el-option-group>
+      </el-select>
+      <el-select
+        v-model="filters.agency_id"
+        placeholder="所属机构"
+        clearable
+        filterable
+        style="width: 180px"
+      >
+        <el-option v-for="a in agencyOptions" :key="a.id" :label="a.name" :value="a.id" />
+      </el-select>
       <el-input v-model="filters.keyword" placeholder="搜索昵称/ID" clearable style="width: 200px" />
       <el-input-number v-model="filters.follower_min" :min="0" placeholder="粉丝下限" controls-position="right" />
       <el-input-number v-model="filters.follower_max" :min="0" placeholder="粉丝上限" controls-position="right" />
@@ -35,6 +58,22 @@
       </el-table-column>
       <el-table-column label="来源" width="100">
         <template #default="{ row }">{{ formatSource(row.source) }}</template>
+      </el-table-column>
+      <el-table-column label="标签" min-width="160">
+        <template #default="{ row }">
+          <el-tag
+            v-for="tag in row.tags || []"
+            :key="tag.id"
+            size="small"
+            style="margin-right: 4px; margin-bottom: 2px"
+          >
+            {{ tag.name }}
+          </el-tag>
+          <span v-if="!row.tags?.length">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="机构" width="130" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.agency_name || '-' }}</template>
       </el-table-column>
       <el-table-column label="操作" width="160" fixed="right">
         <template #default="{ row }">
@@ -106,7 +145,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadFile } from 'element-plus'
 import {
@@ -122,6 +161,8 @@ import {
   type ImportResult,
   type Influencer,
 } from '@/api/influencer'
+import { TAG_CATEGORY_MAP, getTags, type Tag } from '@/api/tags'
+import { getAgencyOptions, type Agency } from '@/api/agencies'
 
 const loading = ref(false)
 const creating = ref(false)
@@ -131,6 +172,21 @@ const showImport = ref(false)
 const importFile = ref<File | null>(null)
 const importResult = ref<ImportResult | null>(null)
 const list = ref<Influencer[]>([])
+const allTags = ref<Tag[]>([])
+const agencyOptions = ref<Agency[]>([])
+
+const tagOptions = computed(() => {
+  const groups: Record<string, Tag[]> = {}
+  for (const tag of allTags.value) {
+    const cat = tag.category || 'other'
+    if (!groups[cat]) groups[cat] = []
+    groups[cat].push(tag)
+  }
+  return Object.entries(groups).map(([key, options]) => ({
+    label: TAG_CATEGORY_MAP[key] || key,
+    options,
+  }))
+})
 
 const filters = reactive({
   platform: '',
@@ -138,6 +194,8 @@ const filters = reactive({
   keyword: '',
   follower_min: undefined as number | undefined,
   follower_max: undefined as number | undefined,
+  tag_ids: [] as number[],
+  agency_id: undefined as number | undefined,
 })
 
 const pagination = reactive({
@@ -165,6 +223,8 @@ async function loadData() {
       keyword: filters.keyword || undefined,
       follower_min: filters.follower_min,
       follower_max: filters.follower_max,
+      tag_ids: filters.tag_ids.length ? filters.tag_ids : undefined,
+      agency_id: filters.agency_id,
     })
     list.value = res.data.items
     pagination.total = res.data.total
@@ -184,6 +244,8 @@ function handleReset() {
   filters.keyword = ''
   filters.follower_min = undefined
   filters.follower_max = undefined
+  filters.tag_ids = []
+  filters.agency_id = undefined
   handleSearch()
 }
 
@@ -228,7 +290,16 @@ async function handleImport() {
   }
 }
 
-onMounted(loadData)
+onMounted(async () => {
+  try {
+    const [tagsRes, agencyRes] = await Promise.all([getTags(), getAgencyOptions()])
+    allTags.value = tagsRes.data
+    agencyOptions.value = agencyRes.data
+  } catch {
+    /* ignore */
+  }
+  loadData()
+})
 </script>
 
 <style scoped>

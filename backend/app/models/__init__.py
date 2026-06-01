@@ -6,6 +6,7 @@ from sqlalchemy.types import JSON
 
 from app.database import Base
 from app.models.collection import CollectedInfluencer, CollectionTask
+from app.models.match import MatchRequest, MatchResult
 
 __all__ = [
     "User",
@@ -16,6 +17,8 @@ __all__ = [
     "InfluencerTag",
     "CollectionTask",
     "CollectedInfluencer",
+    "MatchRequest",
+    "MatchResult",
 ]
 
 

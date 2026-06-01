@@ -22,7 +22,7 @@
           登录
         </el-button>
       </el-form>
-      <p class="hint">默认账号: admin / admin123</p>
+      <p v-if="isDev" class="hint">开发环境请在 backend/.env 中配置 ADMIN_USERNAME / ADMIN_PASSWORD</p>
     </el-card>
   </div>
 </template>
@@ -39,9 +39,11 @@ const formRef = ref<FormInstance>()
 const loading = ref(false)
 
 const form = reactive({
-  username: 'admin',
-  password: 'admin123',
+  username: '',
+  password: '',
 })
+
+const isDev = import.meta.env.DEV
 
 const rules: FormRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],

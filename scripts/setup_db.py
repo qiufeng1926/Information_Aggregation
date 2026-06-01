@@ -4,6 +4,7 @@
 import getpass
 import os
 import re
+import secrets
 import sys
 
 try:
@@ -28,6 +29,8 @@ def read_sql(path: str) -> str:
 
 
 def write_env(root_password: str) -> None:
+    admin_password = secrets.token_urlsafe(12)
+    secret_key = secrets.token_urlsafe(32)
     content = f"""DB_HOST=localhost
 DB_PORT=3306
 DB_USER={APP_USER}
@@ -37,12 +40,20 @@ DB_NAME={DB_NAME}
 MYSQL_ROOT_PASSWORD={root_password}
 
 REDIS_URL=redis://localhost:6379/0
-SECRET_KEY=dev-secret-key-change-in-production
+SECRET_KEY={secret_key}
 DEBUG=true
+
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD={admin_password}
+
+LOGIN_RATE_LIMIT_MAX_ATTEMPTS=5
+LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 """
     with open(ENV_FILE, "w", encoding="utf-8") as f:
         f.write(content)
     print(f"  Config written: {ENV_FILE}")
+    print(f"  Admin login : admin / {admin_password}")
+    print("  (请妥善保存上述密码，首次登录后建议修改)")
 
 
 def load_root_password() -> str:

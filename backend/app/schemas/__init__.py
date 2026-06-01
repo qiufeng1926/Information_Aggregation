@@ -101,6 +101,7 @@ class InfluencerOut(InfluencerBase):
     updated_at: datetime
     tags: list[TagBrief] = []
     profile: InfluencerProfileOut | None = None
+    agency_name: str | None = None
 
 
 class InfluencerFilter(BaseModel):
@@ -110,6 +111,7 @@ class InfluencerFilter(BaseModel):
     follower_min: int | None = None
     follower_max: int | None = None
     tag_ids: list[int] | None = None
+    agency_id: int | None = None
     status: int | None = 1
 
 

@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from app.api.v1 import auth, collection, influencers
+from app.api.v1 import auth, agencies, collection, influencers, match, tags
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.middleware.request_log import RequestLogMiddleware
@@ -42,16 +42,37 @@ def init_db():
         raise exc
     db: Session = SessionLocal()
     try:
-        admin = db.query(User).filter(User.username == "admin").first()
-        if not admin:
-            admin = User(
-                username="admin",
-                password_hash=get_password_hash("admin123"),
-                nickname="管理员",
-                role="admin",
-            )
-            db.add(admin)
-            db.commit()
+        has_users = db.query(User).count() > 0
+        if not has_users:
+            username = settings.ADMIN_USERNAME.strip()
+            password = settings.ADMIN_PASSWORD
+            if username and password:
+                if len(password) < 8:
+                    raise RuntimeError("ADMIN_PASSWORD 长度至少 8 位")
+                admin = User(
+                    username=username,
+                    password_hash=get_password_hash(password),
+                    nickname="管理员",
+                    role="admin",
+                )
+                db.add(admin)
+                db.commit()
+                print(f"已创建管理员账号: {username}")
+            else:
+                print("\n" + "!" * 60)
+                print("警告: 系统中尚无用户，且未配置 ADMIN_USERNAME / ADMIN_PASSWORD")
+                print("请在 backend/.env 中设置后重启，或通过数据库手动创建用户")
+                print("!" * 60 + "\n")
+    finally:
+        db.close()
+
+    db = SessionLocal()
+    try:
+        from app.services.tag_service import TagService
+
+        seeded = TagService.seed_defaults(db)
+        if seeded:
+            print(f"已初始化 {seeded} 个预置标签")
     finally:
         db.close()
 
@@ -77,6 +98,9 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(influencers.router, prefix="/api/v1")
 app.include_router(collection.router, prefix="/api/v1")
+app.include_router(tags.router, prefix="/api/v1")
+app.include_router(agencies.router, prefix="/api/v1")
+app.include_router(match.router, prefix="/api/v1")
 
 
 @app.get("/health")

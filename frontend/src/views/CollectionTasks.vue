@@ -14,6 +14,11 @@
         <template #default="{ row }">{{ formatPlatform(row.platform) }}</template>
       </el-table-column>
       <el-table-column prop="keyword" label="关键词" width="120" />
+      <el-table-column label="筛选条件" min-width="180" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span class="filter-summary">{{ (row.filter_summary || ['不限']).join(' · ') }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
           <el-tag :type="(TASK_STATUS_MAP[row.status]?.type as any) || 'info'">
@@ -32,8 +37,9 @@
       <el-table-column prop="created_at" label="创建时间" width="170">
         <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="180" fixed="right">
+      <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
+          <el-button link type="primary" @click="openDetail(row.id)">详情</el-button>
           <el-button
             link
             type="primary"
@@ -95,6 +101,8 @@
         </p>
         <p v-if="backendPython" class="tip python-path">后端 Python：{{ backendPython }}</p>
         <p v-if="envHint" class="warn tip">{{ envHint }}</p>
+        <p v-if="loginWarning" class="warn tip">{{ loginWarning }}</p>
+        <p v-if="storageUpdatedAt" class="tip">登录态更新时间：{{ storageUpdatedAt }}</p>
         <p class="tip">Playwright 将自动在星图页面应用所选筛选，结果进入待审核列表。</p>
       </div>
       <template #footer>
@@ -103,6 +111,52 @@
         <el-button type="primary" :loading="creating" @click="handleCreate">开始采集</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer v-model="showDetail" title="采集任务详情" size="520px">
+      <div v-if="detailLoading" v-loading="true" style="height: 120px" />
+      <template v-else-if="taskDetail">
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="任务 ID">{{ taskDetail.id }}</el-descriptions-item>
+          <el-descriptions-item label="关键词">{{ taskDetail.keyword }}</el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag :type="(TASK_STATUS_MAP[taskDetail.status]?.type as any) || 'info'">
+              {{ TASK_STATUS_MAP[taskDetail.status]?.label || taskDetail.status }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="采集数">{{ taskDetail.result_count }}</el-descriptions-item>
+          <el-descriptions-item label="已通过">{{ taskDetail.approved_count }}</el-descriptions-item>
+          <el-descriptions-item label="耗时">{{ formatDuration(taskDetail.duration_seconds) }}</el-descriptions-item>
+          <el-descriptions-item v-if="taskDetail.retry_count" label="重试次数">
+            {{ taskDetail.retry_count }}
+          </el-descriptions-item>
+          <el-descriptions-item v-if="taskDetail.queue_position" label="队列位置">
+            第 {{ taskDetail.queue_position }} 位
+          </el-descriptions-item>
+          <el-descriptions-item label="筛选条件">
+            <el-tag
+              v-for="item in taskDetail.filter_summary || ['不限']"
+              :key="item"
+              size="small"
+              style="margin: 2px 4px 2px 0"
+            >
+              {{ item }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="taskDetail.error_message" label="错误信息">
+            <span class="error-msg">{{ taskDetail.error_message }}</span>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <h4 v-if="taskDetail.sample_items?.length" class="detail-subtitle">采集样本（Top {{ taskDetail.sample_items.length }}）</h4>
+        <el-table v-if="taskDetail.sample_items?.length" :data="taskDetail.sample_items" size="small" stripe>
+          <el-table-column prop="nickname" label="昵称" />
+          <el-table-column label="粉丝" width="90">
+            <template #default="{ row }">{{ formatFollowers(row.follower_count) }}</template>
+          </el-table-column>
+          <el-table-column prop="match_score" label="匹配度" width="80" />
+        </el-table>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
@@ -113,10 +167,14 @@ import { ElMessage } from 'element-plus'
 import {
   TASK_STATUS_MAP,
   createCollectionTask,
+  formatDuration,
+  formatFollowers,
   formatPlatform,
+  getCollectionTaskDetail,
   getCollectionTasks,
   retryCollectionTask,
   type CollectionTask,
+  type CollectionTaskDetail,
 } from '@/api/collection'
 import request, { type ApiResponse } from '@/api/request'
 import CollectionFilterPanel from '@/components/CollectionFilterPanel.vue'
@@ -130,7 +188,13 @@ const collectorMode = ref('browser')
 const storageConfigured = ref(false)
 const playwrightReady = ref(false)
 const envHint = ref('')
+const loginWarning = ref('')
+const storageUpdatedAt = ref('')
 const backendPython = ref('')
+
+const showDetail = ref(false)
+const detailLoading = ref(false)
+const taskDetail = ref<CollectionTaskDetail | null>(null)
 
 const router = useRouter()
 const loading = ref(false)
@@ -170,11 +234,15 @@ async function loadCollectorConfig() {
         python: string
         ready: boolean
         hint: string
+        login_warning?: string
+        storage_updated_at?: string
       }>
     >('/collection/config')
     collectorMode.value = res.data.mode
     storageConfigured.value = res.data.storage_configured
     backendPython.value = res.data.python || ''
+    loginWarning.value = res.data.login_warning || ''
+    storageUpdatedAt.value = res.data.storage_updated_at || ''
     playwrightReady.value =
       res.data.ready ??
       (res.data.playwright_installed && res.data.chromium_ready && res.data.storage_configured)
@@ -223,8 +291,20 @@ function goReview(taskId: number) {
 
 async function handleRetry(taskId: number) {
   await retryCollectionTask(taskId)
-  ElMessage.success('任务已重新启动')
+  ElMessage.success('任务已重新加入队列')
   loadData()
+}
+
+async function openDetail(taskId: number) {
+  showDetail.value = true
+  detailLoading.value = true
+  taskDetail.value = null
+  try {
+    const res = await getCollectionTaskDetail(taskId)
+    taskDetail.value = res.data
+  } finally {
+    detailLoading.value = false
+  }
 }
 
 watch(showCreate, (open) => {
@@ -286,5 +366,15 @@ onUnmounted(() => {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid #ebeef5;
+}
+
+.filter-summary {
+  font-size: 12px;
+  color: #606266;
+}
+
+.detail-subtitle {
+  margin: 20px 0 12px;
+  font-size: 14px;
 }
 </style>

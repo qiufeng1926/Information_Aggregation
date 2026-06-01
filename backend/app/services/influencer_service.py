@@ -85,6 +85,7 @@ class InfluencerService:
             .options(
                 joinedload(Influencer.tags).joinedload(InfluencerTag.tag),
                 joinedload(Influencer.profile),
+                joinedload(Influencer.agency),
             )
             .filter(Influencer.id == influencer_id)
             .first()
@@ -121,12 +122,16 @@ class InfluencerService:
             )
         if filters.tag_ids:
             query = query.join(InfluencerTag).filter(InfluencerTag.tag_id.in_(filters.tag_ids))
+        if filters.agency_id is not None:
+            query = query.filter(Influencer.agency_id == filters.agency_id)
 
-        total = query.count()
+        total = query.distinct().count()
         items = (
-            query.options(
+            query.distinct()
+            .options(
                 joinedload(Influencer.tags).joinedload(InfluencerTag.tag),
                 joinedload(Influencer.profile),
+                joinedload(Influencer.agency),
             )
             .order_by(Influencer.updated_at.desc())
             .offset((page - 1) * page_size)

@@ -8,6 +8,7 @@ export interface Influencer {
   avatar_url: string | null
   profile_url: string | null
   agency_id: number | null
+  agency_name?: string | null
   follower_count: number
   engagement_rate: number | null
   source: string | null
@@ -36,6 +37,8 @@ export interface InfluencerQuery {
   keyword?: string
   follower_min?: number
   follower_max?: number
+  tag_ids?: number[]
+  agency_id?: number
   status?: number
 }
 
@@ -47,7 +50,10 @@ export interface ImportResult {
 }
 
 export function getInfluencers(params: InfluencerQuery) {
-  return request.get<any, ApiResponse<PageResult<Influencer>>>('/influencers', { params })
+  return request.get<any, ApiResponse<PageResult<Influencer>>>('/influencers', {
+    params,
+    paramsSerializer: { indexes: null },
+  })
 }
 
 export function getInfluencer(id: number) {

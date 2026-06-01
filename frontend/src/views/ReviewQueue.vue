@@ -1,5 +1,11 @@
 <template>
   <div class="page-card">
+    <el-tabs v-model="activeTab" @tab-change="handleTabChange">
+      <el-tab-pane label="待审核" name="pending" />
+      <el-tab-pane label="已通过" name="approved" />
+      <el-tab-pane label="已拒绝" name="rejected" />
+    </el-tabs>
+
     <div class="filter-bar">
       <el-select v-model="taskId" placeholder="筛选任务" clearable style="width: 200px" @change="handleSearch">
         <el-option v-for="t in tasks" :key="t.id" :label="`${t.keyword} (#${t.id})`" :value="t.id" />
@@ -7,12 +13,14 @@
       <el-button type="primary" @click="handleSearch">搜索</el-button>
       <el-button @click="loadData">刷新</el-button>
       <div style="flex: 1"></div>
-      <el-button type="success" :disabled="!selectedIds.length" @click="handleBatchApprove">
-        批量通过 ({{ selectedIds.length }})
-      </el-button>
-      <el-button type="danger" :disabled="!selectedIds.length" @click="handleBatchReject">
-        批量拒绝
-      </el-button>
+      <template v-if="activeTab === 'pending'">
+        <el-button type="success" :disabled="!selectedIds.length" @click="handleBatchApprove">
+          批量通过 ({{ selectedIds.length }})
+        </el-button>
+        <el-button type="danger" :disabled="!selectedIds.length" @click="handleBatchReject">
+          批量拒绝
+        </el-button>
+      </template>
     </div>
 
     <el-table
@@ -21,7 +29,7 @@
       stripe
       @selection-change="handleSelectionChange"
     >
-      <el-table-column type="selection" width="50" />
+      <el-table-column v-if="activeTab === 'pending'" type="selection" width="50" />
       <el-table-column label="头像" width="70">
         <template #default="{ row }">
           <el-avatar :size="40" :src="row.avatar_url || undefined">
@@ -29,7 +37,12 @@
           </el-avatar>
         </template>
       </el-table-column>
-      <el-table-column prop="nickname" label="昵称" min-width="140" />
+      <el-table-column prop="nickname" label="昵称" min-width="140">
+        <template #default="{ row }">
+          <span>{{ row.nickname }}</span>
+          <el-tag v-if="row.in_library" size="small" type="warning" style="margin-left: 6px">库内已有</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="平台" width="80">
         <template #default="{ row }">{{ formatPlatform(row.platform) }}</template>
       </el-table-column>
@@ -41,6 +54,9 @@
           <el-tag type="success">{{ row.match_score }}分</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="MCN机构" width="130" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.mcn_name || '-' }}</template>
+      </el-table-column>
       <el-table-column label="标签" min-width="140">
         <template #default="{ row }">
           <el-tag v-for="tag in row.matched_tags || []" :key="tag" size="small" style="margin-right: 4px">
@@ -48,18 +64,13 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="带货信息" min-width="160">
+      <el-table-column label="操作" width="200" fixed="right">
         <template #default="{ row }">
-          <span v-if="row.extra_data">
-            GMV {{ row.extra_data.recent_gmv }} / 橱窗 {{ row.extra_data.showcase_count }}
-          </span>
-          <span v-else>-</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="160" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="success" @click="handleApprove([row.id])">通过</el-button>
-          <el-button link type="danger" @click="handleReject([row.id])">拒绝</el-button>
+          <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+          <template v-if="activeTab === 'pending'">
+            <el-button link type="success" @click="handleApprove([row.id])">通过</el-button>
+            <el-button link type="danger" @click="handleReject([row.id])">拒绝</el-button>
+          </template>
         </template>
       </el-table-column>
     </el-table>
@@ -73,11 +84,51 @@
         @change="loadData"
       />
     </div>
+
+    <el-drawer v-model="showDrawer" title="达人详情" size="480px">
+      <template v-if="currentItem">
+        <div class="detail-header">
+          <el-avatar :size="56" :src="currentItem.avatar_url || undefined">
+            {{ currentItem.nickname?.[0] || '达' }}
+          </el-avatar>
+          <div>
+            <h3>{{ currentItem.nickname }}</h3>
+            <p>{{ formatPlatform(currentItem.platform) }} · UID {{ currentItem.platform_uid }}</p>
+          </div>
+        </div>
+
+        <el-descriptions :column="1" border size="small">
+          <el-descriptions-item label="粉丝量">{{ formatFollowers(currentItem.follower_count) }}</el-descriptions-item>
+          <el-descriptions-item label="匹配度">{{ currentItem.match_score }} 分</el-descriptions-item>
+          <el-descriptions-item label="库内状态">
+            <el-tag :type="currentItem.in_library ? 'warning' : 'success'">
+              {{ currentItem.in_library ? '已存在于达人库' : '新达人' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="rawData.city" label="城市">{{ rawData.city }}</el-descriptions-item>
+          <el-descriptions-item v-if="rawData.gender" label="性别">{{ formatGender(rawData.gender) }}</el-descriptions-item>
+          <el-descriptions-item v-if="rawData.short_id" label="抖音号">{{ rawData.short_id }}</el-descriptions-item>
+          <el-descriptions-item label="MCN机构">
+            {{ currentItem.mcn_name || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="标签">
+            <el-tag v-for="tag in currentItem.matched_tags || []" :key="tag" size="small" style="margin-right: 4px">
+              {{ tag }}
+            </el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <div v-if="activeTab === 'pending'" class="drawer-actions">
+          <el-button type="success" @click="handleApprove([currentItem.id])">通过并入库</el-button>
+          <el-button type="danger" @click="handleReject([currentItem.id])">拒绝</el-button>
+        </div>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -86,6 +137,7 @@ import {
   formatPlatform,
   getCollectionTasks,
   getPendingReview,
+  getReviewedItems,
   rejectCollected,
   type CollectedInfluencer,
   type CollectionTask,
@@ -96,14 +148,34 @@ const loading = ref(false)
 const list = ref<CollectedInfluencer[]>([])
 const tasks = ref<CollectionTask[]>([])
 const selectedIds = ref<number[]>([])
+const activeTab = ref<'pending' | 'approved' | 'rejected'>('pending')
 const taskId = ref<number | undefined>(
   route.query.task_id ? Number(route.query.task_id) : undefined
 )
 
+const showDrawer = ref(false)
+const currentItem = ref<CollectedInfluencer | null>(null)
+
+const rawData = computed(() => {
+  const extra = currentItem.value?.extra_data as Record<string, unknown> | undefined
+  return (extra?.xingtu_raw as Record<string, string>) || {}
+})
+
 const pagination = reactive({ page: 1, page_size: 20, total: 0 })
+
+function formatGender(value: string) {
+  if (value === '1') return '男'
+  if (value === '2') return '女'
+  return value
+}
 
 function handleSelectionChange(rows: CollectedInfluencer[]) {
   selectedIds.value = rows.map((r) => r.id)
+}
+
+function openDetail(row: CollectedInfluencer) {
+  currentItem.value = row
+  showDrawer.value = true
 }
 
 async function loadTasks() {
@@ -114,11 +186,15 @@ async function loadTasks() {
 async function loadData() {
   loading.value = true
   try {
-    const res = await getPendingReview({
+    const params = {
       task_id: taskId.value,
       page: pagination.page,
       page_size: pagination.page_size,
-    })
+    }
+    const res =
+      activeTab.value === 'pending'
+        ? await getPendingReview(params)
+        : await getReviewedItems({ ...params, review_status: activeTab.value })
     list.value = res.data.items
     pagination.total = res.data.total
   } finally {
@@ -131,9 +207,16 @@ function handleSearch() {
   loadData()
 }
 
+function handleTabChange() {
+  selectedIds.value = []
+  pagination.page = 1
+  loadData()
+}
+
 async function handleApprove(ids: number[]) {
   const res = await approveCollected(ids)
-  ElMessage.success(`已通过 ${res.data.approved} 条，入库达人库`)
+  ElMessage.success(`已通过 ${res.data.approved} 条，已自动打标并关联机构`)
+  showDrawer.value = false
   selectedIds.value = []
   loadData()
 }
@@ -142,6 +225,7 @@ async function handleReject(ids: number[]) {
   await ElMessageBox.confirm('确认拒绝所选达人？', '提示', { type: 'warning' })
   const res = await rejectCollected(ids)
   ElMessage.success(`已拒绝 ${res.data.rejected} 条`)
+  showDrawer.value = false
   selectedIds.value = []
   loadData()
 }
@@ -173,5 +257,28 @@ onMounted(async () => {
   margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+}
+
+.detail-header {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.detail-header h3 {
+  margin: 0 0 4px;
+}
+
+.detail-header p {
+  margin: 0;
+  color: #909399;
+  font-size: 13px;
+}
+
+.drawer-actions {
+  margin-top: 20px;
+  display: flex;
+  gap: 12px;
 }
 </style>

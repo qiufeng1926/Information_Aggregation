@@ -1,24 +1,45 @@
 <template>
   <div class="page-card">
-    <el-row :gutter="20">
-      <el-col :span="8">
-        <el-statistic title="达人总数" :value="stats.total" />
+    <el-row :gutter="16" class="stats-row">
+      <el-col :span="6">
+        <el-statistic title="达人总数" :value="stats.influencerTotal" />
       </el-col>
-      <el-col :span="8">
-        <el-statistic title="抖音达人" :value="stats.douyin" />
+      <el-col :span="6">
+        <el-statistic title="待审核" :value="stats.pendingReview">
+          <template #suffix>
+            <el-button link type="primary" @click="$router.push('/review')">去审核</el-button>
+          </template>
+        </el-statistic>
       </el-col>
-      <el-col :span="8">
-        <el-statistic title="小红书达人" :value="stats.xiaohongshu" />
+      <el-col :span="6">
+        <el-statistic title="今日采集" :value="stats.todayCollected" />
+      </el-col>
+      <el-col :span="6">
+        <el-statistic title="任务成功率" :value="stats.successRate" suffix="%" />
       </el-col>
     </el-row>
 
     <el-divider />
 
+    <el-alert
+      v-if="stats.runningTaskId"
+      type="warning"
+      :closable="false"
+      show-icon
+      :title="`采集任务 #${stats.runningTaskId} 正在执行，队列中还有 ${stats.queuedTasks} 个任务等待`"
+      style="margin-bottom: 16px"
+    />
+
     <div class="welcome">
       <h3>欢迎使用达人信息聚合系统</h3>
-      <p>当前为 Phase 1 版本，支持达人库管理、多维筛选与 Excel 批量导入。</p>
-      <el-space>
-        <el-button type="primary" @click="$router.push('/influencers')">进入达人库</el-button>
+      <p>Phase 5：智能匹配已上线，支持按标签/粉丝/机构等条件从达人库推荐并导出清单。</p>
+      <el-space wrap>
+        <el-button type="primary" @click="$router.push('/collection')">发起采集</el-button>
+        <el-button type="success" @click="$router.push('/review')">待审核列表</el-button>
+        <el-button type="warning" @click="$router.push('/match')">智能匹配</el-button>
+        <el-button @click="$router.push('/influencers')">达人库</el-button>
+        <el-button @click="$router.push('/tags')">标签管理</el-button>
+        <el-button @click="$router.push('/agencies')">MCN机构</el-button>
       </el-space>
     </div>
   </div>
@@ -26,29 +47,39 @@
 
 <script setup lang="ts">
 import { onMounted, reactive } from 'vue'
+import { getCollectionStats } from '@/api/collection'
 import { getInfluencers } from '@/api/influencer'
 
 const stats = reactive({
-  total: 0,
-  douyin: 0,
-  xiaohongshu: 0,
+  influencerTotal: 0,
+  pendingReview: 0,
+  todayCollected: 0,
+  successRate: 100,
+  runningTaskId: null as number | null,
+  queuedTasks: 0,
 })
 
 async function loadStats() {
-  const [all, douyin, xhs] = await Promise.all([
+  const [influencers, collection] = await Promise.all([
     getInfluencers({ page: 1, page_size: 1 }),
-    getInfluencers({ page: 1, page_size: 1, platform: 'douyin' }),
-    getInfluencers({ page: 1, page_size: 1, platform: 'xiaohongshu' }),
+    getCollectionStats(),
   ])
-  stats.total = all.data.total
-  stats.douyin = douyin.data.total
-  stats.xiaohongshu = xhs.data.total
+  stats.influencerTotal = influencers.data.total
+  stats.pendingReview = collection.data.pending_review
+  stats.todayCollected = collection.data.today_collected
+  stats.successRate = collection.data.success_rate
+  stats.runningTaskId = collection.data.running_task_id
+  stats.queuedTasks = collection.data.queued_tasks
 }
 
 onMounted(loadStats)
 </script>
 
 <style scoped>
+.stats-row {
+  margin-bottom: 8px;
+}
+
 .welcome h3 {
   margin-top: 0;
 }

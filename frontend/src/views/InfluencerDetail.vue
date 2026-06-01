@@ -11,6 +11,18 @@
         <el-descriptions-item label="平台">{{ formatPlatform(form.platform) }}</el-descriptions-item>
         <el-descriptions-item label="达人ID">{{ form.platform_uid }}</el-descriptions-item>
         <el-descriptions-item label="来源">{{ formatSource(form.source) }}</el-descriptions-item>
+        <el-descriptions-item label="所属机构">
+          <el-select
+            v-model="agencyId"
+            clearable
+            filterable
+            placeholder="选择 MCN 机构"
+            style="width: 100%"
+            @change="handleAgencyChange"
+          >
+            <el-option v-for="a in agencyOptions" :key="a.id" :label="a.name" :value="a.id" />
+          </el-select>
+        </el-descriptions-item>
         <el-descriptions-item label="粉丝量">{{ formatFollowers(form.follower_count) }}</el-descriptions-item>
         <el-descriptions-item label="互动率">{{ form.engagement_rate ?? '-' }}</el-descriptions-item>
         <el-descriptions-item label="主页链接" :span="2">
@@ -18,6 +30,35 @@
           <span v-else>-</span>
         </el-descriptions-item>
       </el-descriptions>
+
+      <el-divider />
+
+      <h3>标签</h3>
+      <div class="tag-section">
+        <el-select
+          v-model="selectedTagIds"
+          multiple
+          filterable
+          placeholder="选择或搜索标签"
+          style="width: 100%; max-width: 560px"
+          @change="handleTagsChange"
+        >
+          <el-option-group v-for="group in tagOptions" :key="group.label" :label="group.label">
+            <el-option v-for="tag in group.options" :key="tag.id" :label="tag.name" :value="tag.id" />
+          </el-option-group>
+        </el-select>
+        <div class="tag-list">
+          <el-tag
+            v-for="tag in form.tags || []"
+            :key="tag.id"
+            closable
+            style="margin: 4px 8px 4px 0"
+            @close="removeTag(tag.id)"
+          >
+            {{ tag.name }}
+          </el-tag>
+        </div>
+      </div>
 
       <el-divider />
 
@@ -61,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -72,11 +113,30 @@ import {
   updateInfluencer,
   type Influencer,
 } from '@/api/influencer'
+import { TAG_CATEGORY_MAP, getTags, setInfluencerTags, type Tag } from '@/api/tags'
+import { getAgencyOptions, type Agency } from '@/api/agencies'
 
 const route = useRoute()
 const loading = ref(false)
 const saving = ref(false)
 const form = ref<Influencer | null>(null)
+const allTags = ref<Tag[]>([])
+const agencyOptions = ref<Agency[]>([])
+const selectedTagIds = ref<number[]>([])
+const agencyId = ref<number | undefined>()
+
+const tagOptions = computed(() => {
+  const groups: Record<string, Tag[]> = {}
+  for (const tag of allTags.value) {
+    const cat = tag.category || 'other'
+    if (!groups[cat]) groups[cat] = []
+    groups[cat].push(tag)
+  }
+  return Object.entries(groups).map(([key, options]) => ({
+    label: TAG_CATEGORY_MAP[key] || key,
+    options,
+  }))
+})
 
 const profileForm = reactive({
   cooperation_policy: '',
@@ -94,6 +154,8 @@ async function loadDetail() {
     const id = Number(route.params.id)
     const res = await getInfluencer(id)
     form.value = res.data
+    selectedTagIds.value = (res.data.tags || []).map((t) => t.id)
+    agencyId.value = res.data.agency_id || undefined
 
     const profile = res.data.profile
     profileForm.cooperation_policy = profile?.cooperation_policy || ''
@@ -105,6 +167,25 @@ async function loadDetail() {
   } finally {
     loading.value = false
   }
+}
+
+async function handleAgencyChange() {
+  if (!form.value) return
+  await updateInfluencer(form.value.id, { agency_id: agencyId.value ?? null })
+  ElMessage.success('机构已更新')
+  loadDetail()
+}
+
+async function handleTagsChange() {
+  if (!form.value) return
+  await setInfluencerTags(form.value.id, selectedTagIds.value)
+  ElMessage.success('标签已更新')
+  loadDetail()
+}
+
+async function removeTag(tagId: number) {
+  selectedTagIds.value = selectedTagIds.value.filter((id) => id !== tagId)
+  await handleTagsChange()
 }
 
 async function handleSave() {
@@ -130,7 +211,16 @@ async function handleSave() {
   }
 }
 
-onMounted(loadDetail)
+onMounted(async () => {
+  try {
+    const [tagsRes, agencyRes] = await Promise.all([getTags(), getAgencyOptions()])
+    allTags.value = tagsRes.data
+    agencyOptions.value = agencyRes.data
+  } catch {
+    /* ignore */
+  }
+  loadDetail()
+})
 </script>
 
 <style scoped>
@@ -142,5 +232,13 @@ onMounted(loadDetail)
 
 h3 {
   margin: 0 0 16px;
+}
+
+.tag-section {
+  margin-bottom: 8px;
+}
+
+.tag-list {
+  margin-top: 12px;
 }
 </style>

@@ -120,6 +120,8 @@ CREATE TABLE IF NOT EXISTS collection_tasks (
     result_count    INT DEFAULT 0,
     approved_count  INT DEFAULT 0,
     error_message   TEXT,
+    retry_count     INT DEFAULT 0,
+    error_category  VARCHAR(30),
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     started_at      DATETIME,
     completed_at    DATETIME,

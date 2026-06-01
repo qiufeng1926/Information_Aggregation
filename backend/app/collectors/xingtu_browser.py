@@ -11,6 +11,7 @@ from app.collectors.base import RawInfluencer, SearchFilters
 from app.config import settings
 from app.constants.xingtu_filters import PAGE_FILTER_LABELS
 from app.collectors.filter_utils import passes_search_filters
+from app.utils.mcn_utils import extract_mcn_name
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,26 @@ INTERCEPT_URL_KEYWORDS = (
     "kol",
     "talent",
 )
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+
+
+def _save_failure_screenshot(page, keyword: str) -> str | None:
+    if page is None:
+        return None
+    try:
+        log_dir = BACKEND_DIR / "logs" / "screenshots"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        safe_kw = re.sub(r"[^\w\u4e00-\u9fff-]+", "_", keyword)[:20] or "keyword"
+        from datetime import datetime
+
+        filename = f"xingtu_fail_{datetime.now():%Y%m%d_%H%M%S}_{safe_kw}.png"
+        path = log_dir / filename
+        page.screenshot(path=str(path), full_page=True)
+        return str(path)
+    except Exception:
+        logger.exception("Failed to save screenshot")
+        return None
 
 
 class XingtuBrowserCollector:
@@ -69,6 +90,7 @@ class XingtuBrowserCollector:
                 pass
 
         logger.info("Xingtu Playwright collect start: keyword=%s", keyword)
+        page = None
 
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -92,12 +114,10 @@ class XingtuBrowserCollector:
                 self._perform_search(page, keyword)
                 page.wait_for_timeout(settings.PLAYWRIGHT_WAIT_AFTER_SEARCH)
 
-                # 滚动加载更多
                 for _ in range(3):
                     page.evaluate("window.scrollBy(0, window.innerHeight)")
                     page.wait_for_timeout(1500)
 
-                # DOM 兜底解析
                 if len(captured) < filters.limit:
                     dom_items = self._parse_dom(page)
                     for item in dom_items:
@@ -105,7 +125,12 @@ class XingtuBrowserCollector:
                         if uid and uid not in seen_ids:
                             seen_ids.add(uid)
                             captured.append(item)
-
+            except Exception as exc:
+                shot = _save_failure_screenshot(page, keyword)
+                if shot:
+                    logger.error("Saved failure screenshot: %s", shot)
+                    raise RuntimeError(f"{exc}（截图: {shot}）") from exc
+                raise
             finally:
                 context.close()
                 browser.close()
@@ -274,15 +299,17 @@ class XingtuBrowserCollector:
                     follower_count = _parse_follower_from_text(text)
                     uid_match = re.search(r"\d{8,}", text)
                     platform_uid = uid_match.group() if uid_match else nickname
+                    mcn_match = re.search(r"MCN[：:\s]+([^\n\r]+)", text, re.I)
                     if nickname:
-                        items.append(
-                            {
-                                "nick_name": nickname,
-                                "author_id": platform_uid,
-                                "follower_count": follower_count,
-                                "_dom": True,
-                            }
-                        )
+                        item: dict[str, Any] = {
+                            "nick_name": nickname,
+                            "author_id": platform_uid,
+                            "follower_count": follower_count,
+                            "_dom": True,
+                        }
+                        if mcn_match:
+                            item["mcn_name"] = mcn_match.group(1).strip()
+                        items.append(item)
                 except Exception:
                     continue
             if items:
@@ -327,6 +354,19 @@ class XingtuBrowserCollector:
         if item.get("_dom"):
             extra["source_type"] = "dom_fallback"
 
+        xingtu_raw = {k: v for k, v in extra.items() if not str(k).startswith("_")}
+        mcn_name = extract_mcn_name({**item, "xingtu_raw": xingtu_raw})
+
+        extra_data: dict[str, Any] = {
+            "recent_gmv": item.get("gmv_30d") or item.get("sale_amount"),
+            "showcase_count": item.get("showcase_count") or item.get("product_count"),
+            "quote_min": item.get("quote_min") or item.get("price_min"),
+            "quote_max": item.get("quote_max") or item.get("price_max"),
+            "xingtu_raw": xingtu_raw,
+        }
+        if mcn_name:
+            extra_data["mcn_name"] = mcn_name
+
         return RawInfluencer(
             platform="douyin",
             platform_uid=platform_uid,
@@ -339,13 +379,7 @@ class XingtuBrowserCollector:
             source="xingtu",
             matched_tags=tag_names[:10],
             match_score=_calc_match_score(keyword, nickname, tag_names),
-            extra_data={
-                "recent_gmv": item.get("gmv_30d") or item.get("sale_amount"),
-                "showcase_count": item.get("showcase_count") or item.get("product_count"),
-                "quote_min": item.get("quote_min") or item.get("price_min"),
-                "quote_max": item.get("quote_max") or item.get("price_max"),
-                "xingtu_raw": {k: v for k, v in extra.items() if not str(k).startswith("_")},
-            },
+            extra_data=extra_data,
         )
 
 

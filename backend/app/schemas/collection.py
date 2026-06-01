@@ -63,9 +63,20 @@ class CollectionTaskOut(BaseModel):
     result_count: int
     approved_count: int
     error_message: str | None
+    retry_count: int = 0
+    error_category: str | None = None
+    filter_summary: list[str] = []
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
+
+
+class CollectionTaskDetailOut(CollectionTaskOut):
+    duration_seconds: int | None = None
+    queue_size: int = 0
+    queue_position: int | None = None
+    running_task_id: int | None = None
+    sample_items: list["CollectedInfluencerOut"] = []
 
 
 class CollectedInfluencerOut(BaseModel):
@@ -85,9 +96,13 @@ class CollectedInfluencerOut(BaseModel):
     matched_tags: list | None
     match_score: float | None
     extra_data: dict | None
+    mcn_name: str | None = None
     review_status: str
     influencer_id: int | None
+    in_library: bool = False
+    existing_influencer_id: int | None = None
     created_at: datetime
+    reviewed_at: datetime | None = None
 
 
 class ReviewAction(BaseModel):
