@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
 from app.api.deps import CurrentUser, DbSession
 from app.schemas import PageResult, ResponseBase
@@ -11,10 +11,11 @@ from app.schemas.collection import (
     ReviewResult,
 )
 from app.services.collection_service import CollectionService, ERROR_CATEGORY_LABELS
+from app.services.session_service import SessionService
 from app.utils.access_control import is_admin
 from app.utils.filter_summary import build_filter_summary
+from app.utils.collected_parsed import is_valid_profile_url, parse_collected_parsed
 from app.utils.mcn_utils import extract_mcn_name
-from app.utils.xingtu_fields import parse_xingtu_item, _is_valid_profile_url
 
 router = APIRouter(prefix="/collection", tags=["自动采集"])
 
@@ -36,34 +37,83 @@ def _collected_out(item, library_map: dict[str, int] | None = None) -> Collected
         data.existing_influencer_id = item.extra_data.get("existing_influencer_id")
     data.mcn_name = extract_mcn_name(item.extra_data)
     extra = item.extra_data or {}
-    parsed = extra.get("parsed") or parse_xingtu_item(extra)
+    parsed = parse_collected_parsed(extra, item.platform)
     if parsed:
         data.short_id = parsed.get("short_id")
         data.city = parsed.get("city")
-        data.xingtu_homepage = parsed.get("xingtu_homepage")
-        data.douyin_homepage = parsed.get("douyin_homepage")
         data.content_styles = parsed.get("content_styles") or []
         contact = parsed.get("contact") or {}
         data.contact_phone = contact.get("phone")
         data.contact_wechat = contact.get("wechat")
         if not data.profile_url:
             candidate = parsed.get("profile_url")
-            if candidate and _is_valid_profile_url(str(candidate)):
+            if candidate and is_valid_profile_url(str(candidate), item.platform):
                 data.profile_url = candidate
-        if data.profile_url and not _is_valid_profile_url(data.profile_url):
+        if data.profile_url and not is_valid_profile_url(data.profile_url, item.platform):
             data.profile_url = None
-        xh = parsed.get("xingtu_homepage")
-        dh = parsed.get("douyin_homepage")
-        data.xingtu_homepage = xh if xh and _is_valid_profile_url(str(xh)) else None
-        data.douyin_homepage = dh if dh and _is_valid_profile_url(str(dh)) else None
+        if item.platform == "xiaohongshu":
+            xh = parsed.get("xhs_homepage")
+            pgy = parsed.get("pgy_homepage")
+            data.xhs_homepage = xh if xh and is_valid_profile_url(str(xh), item.platform) else None
+            data.pgy_homepage = pgy if pgy and is_valid_profile_url(str(pgy), item.platform) else None
+        else:
+            xh = parsed.get("xingtu_homepage")
+            dh = parsed.get("douyin_homepage")
+            data.xingtu_homepage = xh if xh and is_valid_profile_url(str(xh), item.platform) else None
+            data.douyin_homepage = dh if dh and is_valid_profile_url(str(dh), item.platform) else None
         if data.engagement_rate is None and parsed.get("engagement_rate") is not None:
             data.engagement_rate = parsed.get("engagement_rate")
     return data
 
 
 @router.get("/config", response_model=ResponseBase[dict])
-def get_collection_config(_: CurrentUser):
-    return ResponseBase(data=CollectionService.check_environment())
+def get_collection_config(_: CurrentUser, platform: str = Query("douyin")):
+    return ResponseBase(data=CollectionService.check_environment(platform))
+
+
+@router.get("/sessions", response_model=ResponseBase[list])
+def list_collection_sessions(_: CurrentUser):
+    return ResponseBase(data=SessionService.list_sessions())
+
+
+@router.post("/sessions/{platform}/login/start", response_model=ResponseBase[dict])
+def start_platform_login(_: CurrentUser, platform: str):
+    try:
+        return ResponseBase(data=SessionService.start_login(platform), message="浏览器已打开，请完成登录")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@router.post("/sessions/{platform}/login/save", response_model=ResponseBase[dict])
+def save_platform_login(_: CurrentUser, platform: str):
+    try:
+        return ResponseBase(data=SessionService.save_login(platform), message="登录态已保存")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/sessions/{platform}/login/cancel", response_model=ResponseBase[dict])
+def cancel_platform_login(_: CurrentUser, platform: str):
+    return ResponseBase(data=SessionService.cancel_login(platform), message="已取消登录流程")
+
+
+@router.post("/sessions/{platform}/upload", response_model=ResponseBase[dict])
+async def upload_platform_session(_: CurrentUser, platform: str, file: UploadFile = File(...)):
+    try:
+        content = await file.read()
+        return ResponseBase(
+            data=SessionService.upload_storage_state(platform, content),
+            message="登录态文件已上传",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.delete("/sessions/{platform}", response_model=ResponseBase[dict])
+def delete_platform_session(_: CurrentUser, platform: str):
+    return ResponseBase(data=SessionService.delete_storage_state(platform), message="登录态已清除")
 
 
 @router.get("/stats", response_model=ResponseBase[dict])
@@ -72,7 +122,11 @@ def get_collection_stats(db: DbSession, user: CurrentUser):
 
 
 @router.get("/filter-options", response_model=ResponseBase[dict])
-def get_filter_options(_: CurrentUser):
+def get_filter_options(_: CurrentUser, platform: str = Query("douyin")):
+    if platform == "xiaohongshu":
+        from app.constants.pugongying_filters import get_filter_options
+
+        return ResponseBase(data=get_filter_options())
     from app.constants.xingtu_filters import get_filter_options
 
     return ResponseBase(data=get_filter_options())

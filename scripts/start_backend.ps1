@@ -18,4 +18,4 @@ Get-CimInstance Win32_Process -Filter "name='python.exe'" |
 Start-Sleep -Seconds 2
 
 Write-Host "Starting backend with: $python"
-& $python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+& $python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

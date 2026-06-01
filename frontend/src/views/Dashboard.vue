@@ -21,6 +21,10 @@
 
     <el-divider />
 
+    <CollectionSessionPanel />
+
+    <el-divider />
+
     <el-alert
       v-if="stats.runningTaskId"
       type="warning"
@@ -32,7 +36,7 @@
 
     <div class="welcome">
       <h3>欢迎使用达人信息聚合系统</h3>
-      <p>Phase 5：智能匹配已上线，支持按标签/粉丝/机构等条件从达人库推荐并导出清单。</p>
+      <p>Phase 5：智能匹配已上线。采集前请在工作台配置星图 / 蒲公英登录态。</p>
       <el-space wrap>
         <el-button type="primary" @click="$router.push('/collection')">发起采集</el-button>
         <el-button type="success" @click="$router.push('/review')">待审核列表</el-button>
@@ -47,6 +51,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive } from 'vue'
+import CollectionSessionPanel from '@/components/CollectionSessionPanel.vue'
 import { getCollectionStats } from '@/api/collection'
 import { getInfluencers } from '@/api/influencer'
 

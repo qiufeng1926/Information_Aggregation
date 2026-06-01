@@ -75,8 +75,13 @@
         <el-row :gutter="16">
           <el-col :span="8">
             <el-form-item label="平台" required>
-              <el-select v-model="form.platform" style="width: 100%">
-                <el-option label="抖音" value="douyin" />
+              <el-select v-model="form.platform" style="width: 100%" @change="onPlatformChange">
+                <el-option
+                  v-for="item in COLLECTION_PLATFORM_OPTIONS"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
               </el-select>
             </el-form-item>
           </el-col>
@@ -89,21 +94,22 @@
       </el-form>
 
       <div class="section-title">筛选条件（默认不限）</div>
-      <CollectionFilterPanel v-model="filterForm" />
+      <CollectionFilterPanel v-model="filterForm" :platform="form.platform" />
 
       <div class="env-info">
         <p class="tip">
-          当前采集模式：<el-tag size="small">{{ collectorMode }}</el-tag>
-          <el-tag size="small" :type="playwrightReady ? 'success' : 'danger'" style="margin-left: 8px">
-            {{ playwrightReady ? '环境就绪' : '环境未就绪' }}
+          当前平台登录态：
+          <el-tag size="small" :type="playwrightReady ? 'success' : 'danger'">
+            {{ playwrightReady ? '就绪' : '未就绪' }}
           </el-tag>
-          <el-tag v-if="storageConfigured" size="small" type="success" style="margin-left: 8px">登录态 OK</el-tag>
+          <el-button link type="primary" style="margin-left: 8px" @click="goConfigureSession">
+            前往工作台配置
+          </el-button>
         </p>
-        <p v-if="backendPython" class="tip python-path">后端 Python：{{ backendPython }}</p>
         <p v-if="envHint" class="warn tip">{{ envHint }}</p>
-        <p v-if="loginWarning" class="warn tip">{{ loginWarning }}</p>
-        <p v-if="storageUpdatedAt" class="tip">登录态更新时间：{{ storageUpdatedAt }}</p>
-        <p class="tip">Playwright 将自动在星图页面应用所选筛选，结果进入待审核列表。</p>
+        <p class="tip">
+          Playwright 将自动在{{ form.platform === 'xiaohongshu' ? '蒲公英' : '星图' }}页面应用所选筛选，结果进入待审核列表。
+        </p>
       </div>
       <template #footer>
         <el-button @click="resetCreateForm">重置筛选</el-button>
@@ -165,6 +171,7 @@ import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
+  COLLECTION_PLATFORM_OPTIONS,
   TASK_STATUS_MAP,
   createCollectionTask,
   formatDuration,
@@ -184,13 +191,8 @@ import {
   type CollectionFilters,
 } from '@/constants/collectionFilters'
 
-const collectorMode = ref('browser')
-const storageConfigured = ref(false)
 const playwrightReady = ref(false)
 const envHint = ref('')
-const loginWarning = ref('')
-const storageUpdatedAt = ref('')
-const backendPython = ref('')
 
 const showDetail = ref(false)
 const detailLoading = ref(false)
@@ -217,8 +219,18 @@ function resetCreateForm() {
   filterForm.value = createEmptyFilters()
 }
 
+function onPlatformChange() {
+  filterForm.value = createEmptyFilters()
+  loadCollectorConfig()
+}
+
 function formatTime(value: string) {
   return value?.replace('T', ' ').slice(0, 19)
+}
+
+function goConfigureSession() {
+  showCreate.value = false
+  router.push('/dashboard')
 }
 
 async function loadCollectorConfig() {
@@ -226,30 +238,15 @@ async function loadCollectorConfig() {
     const res = await request.get<
       any,
       ApiResponse<{
-        mode: string
-        storage_configured: boolean
-        playwright_installed: boolean
-        chromium_ready: boolean
-        chromium_error: string
-        python: string
         ready: boolean
         hint: string
-        login_warning?: string
-        storage_updated_at?: string
       }>
-    >('/collection/config')
-    collectorMode.value = res.data.mode
-    storageConfigured.value = res.data.storage_configured
-    backendPython.value = res.data.python || ''
-    loginWarning.value = res.data.login_warning || ''
-    storageUpdatedAt.value = res.data.storage_updated_at || ''
-    playwrightReady.value =
-      res.data.ready ??
-      (res.data.playwright_installed && res.data.chromium_ready && res.data.storage_configured)
+    >('/collection/config', { params: { platform: form.platform } })
+    playwrightReady.value = !!res.data.ready
     envHint.value = res.data.hint || ''
-  } catch (e) {
+  } catch {
     playwrightReady.value = false
-    envHint.value = '无法获取环境状态，请确认后端已启动'
+    envHint.value = '无法获取环境状态，请在工作台配置登录态'
   }
 }
 
@@ -267,6 +264,10 @@ async function loadData() {
 async function handleCreate() {
   if (!form.keyword.trim()) {
     ElMessage.warning('请输入关键词')
+    return
+  }
+  if (!playwrightReady.value) {
+    ElMessage.warning('当前平台登录态未就绪，请先在工作台配置')
     return
   }
   creating.value = true

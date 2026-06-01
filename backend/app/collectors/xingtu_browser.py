@@ -124,7 +124,7 @@ class XingtuBrowserCollector:
 
                 if not self._is_logged_in(page):
                     raise RuntimeError(
-                        "星图未登录或 Cookie 已过期。请运行: python scripts/save_xingtu_session.py"
+                        "星图未登录或 Cookie 已过期。请在工作台配置星图登录态"
                     )
 
                 self._apply_page_filters(page, filters)

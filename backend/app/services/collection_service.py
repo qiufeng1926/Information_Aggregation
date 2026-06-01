@@ -14,7 +14,8 @@ from app.schemas import InfluencerCreate, InfluencerUpdate
 from app.services.agency_service import AgencyService
 from app.services.influencer_service import InfluencerService
 from app.services.tag_service import TagService
-from app.utils.xingtu_fields import build_profile_update_from_extra, merge_profile_patch
+from app.utils.collected_parsed import build_profile_update_from_extra
+from app.utils.xingtu_fields import merge_profile_patch
 from app.utils.filter_summary import build_filter_summary
 
 logger = logging.getLogger(__name__)
@@ -383,7 +384,7 @@ class CollectionService:
         task_ids: set[int] = set()
         for item in items:
             agency_id = AgencyService.resolve_agency_id(db, item.platform, item.extra_data)
-            profile_patch = build_profile_update_from_extra(item.extra_data)
+            profile_patch = build_profile_update_from_extra(item.extra_data, item.platform)
             existing = InfluencerService.get_by_platform_uid(db, item.platform, item.platform_uid)
             if existing:
                 merged_profile = merge_profile_patch(existing.profile, profile_patch) if profile_patch else None
@@ -525,10 +526,12 @@ class CollectionService:
         }
 
     @staticmethod
-    def check_environment() -> dict:
+    def check_environment(platform: str = "douyin") -> dict:
         import importlib.util
         import json
         from datetime import datetime as dt
+
+        from app.config import settings
 
         playwright_ok = importlib.util.find_spec("playwright") is not None
         chromium_ok, chromium_path, chromium_error = _detect_chromium()
@@ -539,9 +542,17 @@ class CollectionService:
                 "请在运行 uvicorn 的同一环境中执行: pip install playwright"
             )
 
-        from app.config import settings
+        if platform == "xiaohongshu":
+            storage_path = (
+                Path(settings.PUGONGYING_STORAGE_STATE) if settings.PUGONGYING_STORAGE_STATE else None
+            )
+            save_session_command = "python scripts/save_pugongying_session.py"
+            storage_label = "蒲公英"
+        else:
+            storage_path = Path(settings.XINGTU_STORAGE_STATE) if settings.XINGTU_STORAGE_STATE else None
+            save_session_command = "python scripts/save_xingtu_session.py"
+            storage_label = "星图"
 
-        storage_path = Path(settings.XINGTU_STORAGE_STATE) if settings.XINGTU_STORAGE_STATE else None
         storage_ok = bool(storage_path and storage_path.exists())
         storage_updated_at = None
         storage_age_days = None
@@ -563,15 +574,19 @@ class CollectionService:
         ready = playwright_ok and chromium_ok and storage_ok
         login_warning = ""
         if storage_ok and storage_age_days is not None and storage_age_days >= 7:
-            login_warning = f"登录态已 {storage_age_days} 天未更新，建议重新运行 save_xingtu_session.py"
+            login_warning = (
+                f"{storage_label}登录态已 {storage_age_days} 天未更新，"
+                "建议在工作台重新登录并保存"
+            )
 
         hint = CollectionService._build_env_hint(
-            playwright_ok, chromium_ok, storage_ok, chromium_error
+            playwright_ok, chromium_ok, storage_ok, chromium_error, storage_label, save_session_command
         )
         if login_warning:
             hint = f"{hint}；{login_warning}" if hint else login_warning
 
         return {
+            "platform": platform,
             "python": sys.executable,
             "playwright_installed": playwright_ok,
             "chromium_ready": chromium_ok,
@@ -585,12 +600,17 @@ class CollectionService:
             "mode": settings.COLLECTOR_MODE,
             "ready": ready,
             "hint": hint,
-            "save_session_command": "python scripts/save_xingtu_session.py",
+            "save_session_command": save_session_command,
         }
 
     @staticmethod
     def _build_env_hint(
-        playwright_ok: bool, chromium_ok: bool, storage_ok: bool, chromium_error: str
+        playwright_ok: bool,
+        chromium_ok: bool,
+        storage_ok: bool,
+        chromium_error: str,
+        storage_label: str = "星图",
+        save_session_command: str = "python scripts/save_xingtu_session.py",
     ) -> str:
         if playwright_ok and chromium_ok and storage_ok:
             return ""
@@ -600,7 +620,7 @@ class CollectionService:
         elif not chromium_ok:
             parts.append(chromium_error or "Chromium 未就绪")
         if not storage_ok:
-            parts.append("星图登录态未配置，请运行 python scripts/save_xingtu_session.py")
+            parts.append(f"{storage_label}登录态未配置，请前往工作台配置")
         if not playwright_ok:
             parts.append(f"当前后端 Python: {sys.executable}")
         return "；".join(parts)

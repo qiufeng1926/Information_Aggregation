@@ -216,6 +216,8 @@ const profileLink = computed(() => {
   if (!item) return ''
   return (
     item.profile_url ||
+    item.xhs_homepage ||
+    item.pgy_homepage ||
     item.douyin_homepage ||
     item.xingtu_homepage ||
     (parsedData.value.profile_url as string) ||

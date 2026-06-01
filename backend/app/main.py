@@ -18,15 +18,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 def log_collect_env():
     from app.services.collection_service import CollectionService
 
-    env = CollectionService.check_environment()
     print("\n" + "=" * 60)
     print("采集环境检测")
-    print(f"  Python     : {env['python']}")
-    print(f"  Playwright : {'已安装' if env['playwright_installed'] else '未安装'}")
-    print(f"  Chromium   : {'已就绪' if env['chromium_ready'] else '未就绪'}")
-    print(f"  星图登录态 : {'已配置' if env['storage_configured'] else '未配置'}")
-    if env.get("hint"):
-        print(f"  提示       : {env['hint']}")
+    for platform, label in (("douyin", "抖音/星图"), ("xiaohongshu", "小红书/蒲公英")):
+        env = CollectionService.check_environment(platform)
+        print(f"  [{label}]")
+        print(f"    Python     : {env['python']}")
+        print(f"    Playwright : {'已安装' if env['playwright_installed'] else '未安装'}")
+        print(f"    Chromium   : {'已就绪' if env['chromium_ready'] else '未就绪'}")
+        print(f"    登录态     : {'已配置' if env['storage_configured'] else '未配置'}")
+        if env.get("hint"):
+            print(f"    提示       : {env['hint']}")
     print("=" * 60 + "\n")
 
 
@@ -81,19 +83,28 @@ def init_db():
 async def lifespan(app: FastAPI):
     init_db()
     log_collect_env()
+    if settings.DEBUG:
+        print(f"CORS origins : {settings.CORS_ORIGINS}")
+        if settings.CORS_ORIGIN_REGEX:
+            print(f"CORS regex   : {settings.CORS_ORIGIN_REGEX}")
     yield
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
 
 app.add_middleware(RequestLogMiddleware)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+_cors_kwargs: dict = {
+    "allow_origins": settings.CORS_ORIGINS,
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+    "expose_headers": ["Content-Disposition"],
+}
+if settings.CORS_ORIGIN_REGEX:
+    _cors_kwargs["allow_origin_regex"] = settings.CORS_ORIGIN_REGEX
+
+app.add_middleware(CORSMiddleware, **_cors_kwargs)
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(influencers.router, prefix="/api/v1")

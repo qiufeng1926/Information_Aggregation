@@ -1,8 +1,10 @@
 from app.collectors.base import BaseCollector
 from app.collectors.douyin import DouyinCollector
+from app.collectors.xiaohongshu import XiaohongshuCollector
 
 _COLLECTORS: dict[str, BaseCollector] = {
     "douyin": DouyinCollector(),
+    "xiaohongshu": XiaohongshuCollector(),
 }
 
 

@@ -53,6 +53,8 @@ export interface CollectedInfluencer {
   content_styles?: string[]
   xingtu_homepage?: string | null
   douyin_homepage?: string | null
+  xhs_homepage?: string | null
+  pgy_homepage?: string | null
   review_status: string
   influencer_id: number | null
   in_library?: boolean
@@ -92,6 +94,64 @@ export function getCollectionTasks(params: { page?: number; page_size?: number }
 
 export function getCollectionTaskDetail(taskId: number) {
   return request.get<any, ApiResponse<CollectionTaskDetail>>(`/collection/tasks/${taskId}/detail`)
+}
+
+export interface PlatformSessionStatus {
+  platform: string
+  label: string
+  login_url: string
+  storage_path: string
+  mode: string
+  ready: boolean
+  storage_configured: boolean
+  storage_updated_at: string | null
+  storage_age_days: number | null
+  cookie_count: number
+  login_warning: string
+  hint: string
+  playwright_installed: boolean
+  chromium_ready: boolean
+  chromium_error: string
+  python: string
+  login_in_progress: boolean
+  login_error: string | null
+  save_session_command?: string
+}
+
+export function getCollectionSessions() {
+  return request.get<any, ApiResponse<PlatformSessionStatus[]>>('/collection/sessions')
+}
+
+export function startPlatformLogin(platform: string) {
+  return request.post<any, ApiResponse<PlatformSessionStatus>>(
+    `/collection/sessions/${platform}/login/start`
+  )
+}
+
+export function savePlatformLogin(platform: string) {
+  return request.post<any, ApiResponse<PlatformSessionStatus>>(
+    `/collection/sessions/${platform}/login/save`
+  )
+}
+
+export function cancelPlatformLogin(platform: string) {
+  return request.post<any, ApiResponse<PlatformSessionStatus>>(
+    `/collection/sessions/${platform}/login/cancel`
+  )
+}
+
+export function uploadPlatformSession(platform: string, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return request.post<any, ApiResponse<PlatformSessionStatus>>(
+    `/collection/sessions/${platform}/upload`,
+    form,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  )
+}
+
+export function deletePlatformSession(platform: string) {
+  return request.delete<any, ApiResponse<PlatformSessionStatus>>(`/collection/sessions/${platform}`)
 }
 
 export function getCollectionStats() {
@@ -142,11 +202,12 @@ export const ERROR_CATEGORY_MAP: Record<string, string> = {
   unknown: '未知错误',
 }
 
-export const PLATFORM_OPTIONS = [
+export const COLLECTION_PLATFORM_OPTIONS = [
   { label: '抖音', value: 'douyin' },
   { label: '小红书', value: 'xiaohongshu' },
-  { label: '快手', value: 'kuaishou' },
 ]
+
+export const PLATFORM_OPTIONS = COLLECTION_PLATFORM_OPTIONS
 
 export function formatPlatform(value: string) {
   return PLATFORM_OPTIONS.find((p) => p.value === value)?.label || value

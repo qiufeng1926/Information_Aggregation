@@ -16,8 +16,8 @@ for /f "tokens=2" %%a in ('wmic process where "commandline like '%%Information_A
 timeout /t 2 /nobreak >nul
 
 REM 2. 启动后端（新窗口）
-echo [2/3] 启动后端 http://127.0.0.1:8000
-start "后端-请勿关闭此窗口" cmd /k "cd /d %~dp0..\backend && echo 后端 Python: %PYTHON% && "%PYTHON%" -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000"
+echo [2/3] 启动后端 http://0.0.0.0:8000
+start "后端-请勿关闭此窗口" cmd /k "cd /d %~dp0..\backend && echo 后端 Python: %PYTHON% && "%PYTHON%" -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
 
 timeout /t 3 /nobreak >nul
 
@@ -27,8 +27,8 @@ start "前端-请勿关闭此窗口" cmd /k "cd /d %~dp0..\frontend && npm run d
 
 echo.
 echo 启动完成！请保持「后端」和「前端」两个窗口运行。
-echo   前端: http://127.0.0.1:5173
-echo   后端: http://127.0.0.1:8000/docs
+echo   前端: http://127.0.0.1:5173  （局域网可用本机 IP:5173）
+echo   后端: http://127.0.0.1:8000/docs  （局域网可用本机 IP:8000）
 echo.
 echo 后端收到请求时会打印: GET /api/v1/... -^> 200
 pause

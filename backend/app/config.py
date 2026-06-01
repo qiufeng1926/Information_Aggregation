@@ -1,7 +1,7 @@
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from pydantic import model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -44,12 +44,46 @@ class Settings(BaseSettings):
     LOGIN_RATE_LIMIT_MAX_ATTEMPTS: int = 5
     LOGIN_RATE_LIMIT_WINDOW_SECONDS: int = 60
 
-    CORS_ORIGINS: list[str] = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ]
+    # 服务监听（0.0.0.0 允许局域网访问）
+    API_HOST: str = "0.0.0.0"
+    API_PORT: int = 8000
+
+    # CORS：逗号分隔，例如 http://localhost:5173,http://192.168.1.10:5173
+    CORS_ORIGINS: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:5174",
+            "http://127.0.0.1:5174",
+            "http://localhost:4173",
+            "http://127.0.0.1:4173",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ]
+    )
+    # 开发环境默认可匹配 localhost / 127.0.0.1 / 局域网 IP 的任意端口
+    CORS_ORIGIN_REGEX: str = ""
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value):
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @model_validator(mode="after")
+    def apply_dev_cors_regex(self) -> "Settings":
+        if self.DEBUG and not self.CORS_ORIGIN_REGEX:
+            self.CORS_ORIGIN_REGEX = (
+                r"https?://("
+                r"localhost|"
+                r"127\.0\.0\.1|"
+                r"192\.168\.\d{1,3}\.\d{1,3}|"
+                r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+                r"172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}"
+                r")(:\d+)?"
+            )
+        return self
 
     # 采集模式: mock(模拟) / api(星图API) / browser(Playwright星图自动化，推荐)
     COLLECTOR_MODE: str = "browser"
@@ -59,6 +93,11 @@ class Settings(BaseSettings):
     XINGTU_COOKIE: str = ""
     XINGTU_COOKIE_FILE: str = ""
     XINGTU_STORAGE_STATE: str = "cookies/xingtu_state.json"
+
+    XIAOHONGSHU_COOKIE: str = ""
+    PUGONGYING_COOKIE: str = ""
+    PUGONGYING_COOKIE_FILE: str = ""
+    PUGONGYING_STORAGE_STATE: str = "cookies/pugongying_state.json"
 
     # Playwright 配置
     PLAYWRIGHT_HEADLESS: bool = False
@@ -85,6 +124,12 @@ class Settings(BaseSettings):
 
         if self.XINGTU_COOKIE_FILE and not Path(self.XINGTU_COOKIE_FILE).is_absolute():
             self.XINGTU_COOKIE_FILE = str(BACKEND_DIR / self.XINGTU_COOKIE_FILE)
+
+        if self.PUGONGYING_STORAGE_STATE and not Path(self.PUGONGYING_STORAGE_STATE).is_absolute():
+            self.PUGONGYING_STORAGE_STATE = str(BACKEND_DIR / self.PUGONGYING_STORAGE_STATE)
+
+        if self.PUGONGYING_COOKIE_FILE and not Path(self.PUGONGYING_COOKIE_FILE).is_absolute():
+            self.PUGONGYING_COOKIE_FILE = str(BACKEND_DIR / self.PUGONGYING_COOKIE_FILE)
 
         return self
 

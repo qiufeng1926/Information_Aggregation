@@ -44,7 +44,7 @@ class CollectionFilters(BaseModel):
 
 
 class CollectionTaskCreate(BaseModel):
-    platform: str = Field(..., description="douyin/xiaohongshu/kuaishou")
+    platform: str = Field(..., description="douyin/xiaohongshu")
     keyword: str = Field(..., min_length=1, max_length=200)
     title: str | None = None
     filters: CollectionFilters | None = None
@@ -104,6 +104,8 @@ class CollectedInfluencerOut(BaseModel):
     content_styles: list[str] = []
     xingtu_homepage: str | None = None
     douyin_homepage: str | None = None
+    xhs_homepage: str | None = None
+    pgy_homepage: str | None = None
     review_status: str
     influencer_id: int | None
     in_library: bool = False

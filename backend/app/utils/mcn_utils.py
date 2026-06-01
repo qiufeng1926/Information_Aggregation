@@ -75,6 +75,12 @@ def extract_mcn_name(data: dict | None) -> str | None:
         if found:
             return found
 
+    pugongying_raw = data.get("pugongying_raw")
+    if isinstance(pugongying_raw, dict):
+        found = _search_mcn_in_object(pugongying_raw)
+        if found:
+            return found
+
     return _search_mcn_in_object(data)
 
 

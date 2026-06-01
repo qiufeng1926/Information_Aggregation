@@ -55,12 +55,13 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import request, { type ApiResponse } from '@/api/request'
 import type { CollectionFilters, FilterGroup } from '@/constants/collectionFilters'
 
 const props = defineProps<{
   modelValue: CollectionFilters
+  platform?: string
 }>()
 
 const emit = defineEmits<{
@@ -109,13 +110,22 @@ async function loadOptions() {
   loading.value = true
   try {
     const res = await request.get<any, ApiResponse<{ groups: FilterGroup[] }>>(
-      '/collection/filter-options'
+      '/collection/filter-options',
+      { params: { platform: props.platform || 'douyin' } }
     )
     groups.value = res.data.groups
+    activeGroups.value = groups.value.map((g) => g.key)
   } finally {
     loading.value = false
   }
 }
+
+watch(
+  () => props.platform,
+  () => {
+    loadOptions()
+  }
+)
 
 onMounted(loadOptions)
 </script>
