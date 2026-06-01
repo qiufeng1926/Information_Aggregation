@@ -1,0 +1,266 @@
+<template>
+  <div class="page-card">
+    <div class="filter-bar">
+      <el-button type="primary" @click="showCreate = true">发起采集</el-button>
+      <el-button @click="loadData">刷新</el-button>
+      <div style="flex: 1"></div>
+      <el-button type="success" @click="$router.push('/review')">待审核列表</el-button>
+    </div>
+
+    <el-table v-loading="loading" :data="list" stripe>
+      <el-table-column prop="id" label="ID" width="70" />
+      <el-table-column prop="title" label="任务名称" min-width="160" />
+      <el-table-column label="平台" width="90">
+        <template #default="{ row }">{{ formatPlatform(row.platform) }}</template>
+      </el-table-column>
+      <el-table-column prop="keyword" label="关键词" width="120" />
+      <el-table-column label="状态" width="100">
+        <template #default="{ row }">
+          <el-tag :type="(TASK_STATUS_MAP[row.status]?.type as any) || 'info'">
+            {{ TASK_STATUS_MAP[row.status]?.label || row.status }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="错误信息" min-width="200" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span v-if="row.error_message" class="error-msg">{{ row.error_message }}</span>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="result_count" label="采集数" width="80" />
+      <el-table-column prop="approved_count" label="已通过" width="80" />
+      <el-table-column prop="created_at" label="创建时间" width="170">
+        <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+      </el-table-column>
+      <el-table-column label="操作" width="180" fixed="right">
+        <template #default="{ row }">
+          <el-button
+            link
+            type="primary"
+            :disabled="row.status === 'running'"
+            @click="goReview(row.id)"
+          >
+            审核
+          </el-button>
+          <el-button
+            link
+            type="warning"
+            :disabled="row.status === 'running'"
+            @click="handleRetry(row.id)"
+          >
+            重试
+          </el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <div class="pagination">
+      <el-pagination
+        v-model:current-page="pagination.page"
+        v-model:page-size="pagination.page_size"
+        :total="pagination.total"
+        layout="total, prev, pager, next"
+        @change="loadData"
+      />
+    </div>
+
+    <el-dialog v-model="showCreate" title="发起采集任务" width="520px">
+      <el-form :model="form" label-width="100px">
+        <el-form-item label="平台" required>
+          <el-select v-model="form.platform" style="width: 100%">
+            <el-option label="抖音" value="douyin" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="关键词" required>
+          <el-input v-model="form.keyword" placeholder="例如：吃播、美妆、探店" />
+        </el-form-item>
+        <el-form-item label="粉丝下限">
+          <el-input-number v-model="form.follower_min" :min="0" :step="10000" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="粉丝上限">
+          <el-input-number v-model="form.follower_max" :min="0" :step="10000" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="采集数量">
+          <el-input-number v-model="form.limit" :min="1" :max="200" style="width: 100%" />
+        </el-form-item>
+      </el-form>
+      <p class="tip">
+        当前采集模式：<el-tag size="small">{{ collectorMode }}</el-tag>
+        <el-tag size="small" :type="playwrightReady ? 'success' : 'danger'" style="margin-left: 8px">
+          {{ playwrightReady ? '环境就绪' : '环境未就绪' }}
+        </el-tag>
+        <el-tag v-if="storageConfigured" size="small" type="success" style="margin-left: 8px">登录态 OK</el-tag>
+      </p>
+      <p v-if="backendPython" class="tip python-path">后端 Python：{{ backendPython }}</p>
+      <p v-if="envHint" class="warn tip">{{ envHint }}</p>
+      <p v-if="envHint && envHint.includes('重启')" class="warn tip">
+        安装 Playwright 后必须<strong>重启后端</strong>（Ctrl+C 停止 uvicorn，再重新运行）。
+      </p>
+      <p class="tip">脚本将通过 Playwright 自动登录星图，按关键词搜索、筛选达人，结果进入待审核列表。</p>
+      <template #footer>
+        <el-button @click="showCreate = false">取消</el-button>
+        <el-button type="primary" :loading="creating" @click="handleCreate">开始采集</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import {
+  TASK_STATUS_MAP,
+  createCollectionTask,
+  formatPlatform,
+  getCollectionTasks,
+  retryCollectionTask,
+  type CollectionTask,
+} from '@/api/collection'
+import request, { type ApiResponse } from '@/api/request'
+
+const collectorMode = ref('browser')
+const storageConfigured = ref(false)
+const playwrightReady = ref(false)
+const envHint = ref('')
+const backendPython = ref('')
+
+const router = useRouter()
+const loading = ref(false)
+const creating = ref(false)
+const showCreate = ref(false)
+const list = ref<CollectionTask[]>([])
+let timer: ReturnType<typeof setInterval> | null = null
+
+const pagination = reactive({ page: 1, page_size: 20, total: 0 })
+
+const form = reactive({
+  platform: 'douyin',
+  keyword: '',
+  follower_min: undefined as number | undefined,
+  follower_max: undefined as number | undefined,
+  limit: 30,
+})
+
+function formatTime(value: string) {
+  return value?.replace('T', ' ').slice(0, 19)
+}
+
+async function loadCollectorConfig() {
+  try {
+    const res = await request.get<
+      any,
+      ApiResponse<{
+        mode: string
+        storage_configured: boolean
+        playwright_installed: boolean
+        chromium_ready: boolean
+        chromium_error: string
+        python: string
+        ready: boolean
+        hint: string
+      }>
+    >('/collection/config')
+    collectorMode.value = res.data.mode
+    storageConfigured.value = res.data.storage_configured
+    backendPython.value = res.data.python || ''
+    playwrightReady.value =
+      res.data.ready ??
+      (res.data.playwright_installed && res.data.chromium_ready && res.data.storage_configured)
+    envHint.value = res.data.hint || ''
+  } catch (e) {
+    playwrightReady.value = false
+    envHint.value = '无法获取环境状态，请确认后端已启动'
+  }
+}
+
+async function loadData() {
+  loading.value = true
+  try {
+    const res = await getCollectionTasks({ page: pagination.page, page_size: pagination.page_size })
+    list.value = res.data.items
+    pagination.total = res.data.total
+  } finally {
+    loading.value = false
+  }
+}
+
+async function handleCreate() {
+  if (!form.keyword.trim()) {
+    ElMessage.warning('请输入关键词')
+    return
+  }
+  creating.value = true
+  try {
+    await createCollectionTask({
+      platform: form.platform,
+      keyword: form.keyword.trim(),
+      filters: {
+        follower_min: form.follower_min,
+        follower_max: form.follower_max,
+        limit: form.limit,
+      },
+    })
+    ElMessage.success('采集任务已启动')
+    showCreate.value = false
+    form.keyword = ''
+    loadData()
+  } finally {
+    creating.value = false
+  }
+}
+
+function goReview(taskId: number) {
+  router.push({ path: '/review', query: { task_id: String(taskId) } })
+}
+
+async function handleRetry(taskId: number) {
+  await retryCollectionTask(taskId)
+  ElMessage.success('任务已重新启动')
+  loadData()
+}
+
+watch(showCreate, (open) => {
+  if (open) loadCollectorConfig()
+})
+
+onMounted(() => {
+  loadCollectorConfig()
+  loadData()
+  timer = setInterval(loadData, 5000)
+})
+
+onUnmounted(() => {
+  if (timer) clearInterval(timer)
+})
+</script>
+
+<style scoped>
+.pagination {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.tip {
+  color: #909399;
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+
+.warn {
+  color: #e6a23c;
+  margin-left: 0;
+}
+
+.python-path {
+  font-size: 12px;
+  color: #909399;
+  word-break: break-all;
+}
+
+.error-msg {
+  color: #f56c6c;
+  font-size: 12px;
+}
+</style>
