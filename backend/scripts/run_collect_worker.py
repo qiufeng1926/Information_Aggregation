@@ -8,6 +8,10 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
+from app.utils.logging_config import setup_logging
+
+setup_logging("collect-worker")
+
 
 def main():
     if len(sys.argv) < 2:

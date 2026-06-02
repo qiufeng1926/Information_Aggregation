@@ -1,5 +1,4 @@
 from contextlib import asynccontextmanager
-import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,9 +12,10 @@ from app.models import User
 from app.models.permission import SystemSetting
 from app.constants.roles import SUPER_ADMIN
 from app.utils.access_control import SETTING_BLOCK_UPPER_TASKS, normalize_role
+from app.utils.logging_config import setup_logging
 from app.utils.security import get_password_hash
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+setup_logging()
 
 
 def log_collect_env():

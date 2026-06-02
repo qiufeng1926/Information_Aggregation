@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
 
+    # 日志：{LOG_SERVICE_NAME}_{YYYYMMDD_HHMMSS}.log，10MB 轮转，15 天清理
+    LOG_DIR: str = "logs"
+    LOG_SERVICE_NAME: str = "influencer-api"
+    LOG_MAX_BYTES: int = 10 * 1024 * 1024
+    LOG_RETENTION_DAYS: int = 15
+    LOG_LEVEL: str = "INFO"
+    LOG_CONSOLE: bool = True
+
     # CORS：逗号分隔，例如 http://localhost:5173,http://192.168.1.10:5173
     CORS_ORIGINS: list[str] = Field(
         default_factory=lambda: [
