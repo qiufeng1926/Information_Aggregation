@@ -48,6 +48,10 @@ export interface CollectedInfluencer {
   mcn_name?: string | null
   short_id?: string | null
   city?: string | null
+  creator_type?: string | null
+  expected_play_count?: number | null
+  completion_rate?: number | null
+  deal_rate?: number | null
   contact_phone?: string | null
   contact_wechat?: string | null
   content_styles?: string[]
@@ -220,9 +224,10 @@ export function formatPlatform(value: string) {
   return PLATFORM_OPTIONS.find((p) => p.value === value)?.label || value
 }
 
-export function formatFollowers(count: number) {
+export function formatFollowers(count: number | null | undefined) {
+  if (count == null) return '-'
   if (count >= 10000) return `${(count / 10000).toFixed(1)}万`
-  return count.toString()
+  return String(count)
 }
 
 export function formatDuration(seconds: number | null | undefined) {

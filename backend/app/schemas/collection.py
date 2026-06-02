@@ -99,6 +99,10 @@ class CollectedInfluencerOut(BaseModel):
     mcn_name: str | None = None
     short_id: str | None = None
     city: str | None = None
+    creator_type: str | None = None
+    expected_play_count: int | None = None
+    completion_rate: float | None = None
+    deal_rate: float | None = None
     contact_phone: str | None = None
     contact_wechat: str | None = None
     content_styles: list[str] = []

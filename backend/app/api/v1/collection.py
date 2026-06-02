@@ -21,6 +21,18 @@ from app.utils.mcn_utils import extract_mcn_name
 router = APIRouter(prefix="/collection", tags=["自动采集"])
 
 
+def _to_optional_float(value) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if num > 1:
+        num = num / 100
+    return round(num, 4)
+
+
 def _task_out(task) -> CollectionTaskOut:
     data = CollectionTaskOut.model_validate(task)
     data.filter_summary = build_filter_summary(task.filters)
@@ -43,6 +55,16 @@ def _collected_out(item, library_map: dict[str, int] | None = None) -> Collected
         data.short_id = parsed.get("short_id")
         data.city = parsed.get("city")
         data.content_styles = parsed.get("content_styles") or []
+        data.creator_type = parsed.get("creator_type") or extra.get("creator_type")
+        data.expected_play_count = parsed.get("expected_play_count") or extra.get("expected_play_count")
+        data.completion_rate = _to_optional_float(parsed.get("completion_rate"))
+        if data.completion_rate is None and extra.get("completion_rate") is not None:
+            data.completion_rate = _to_optional_float(extra.get("completion_rate"))
+        data.deal_rate = _to_optional_float(parsed.get("deal_rate"))
+        if data.deal_rate is None and extra.get("deal_rate") is not None:
+            data.deal_rate = _to_optional_float(extra.get("deal_rate"))
+        if data.avg_views is None and data.expected_play_count is not None:
+            data.avg_views = data.expected_play_count
         contact = parsed.get("contact") or {}
         data.contact_phone = contact.get("phone")
         data.contact_wechat = contact.get("wechat")

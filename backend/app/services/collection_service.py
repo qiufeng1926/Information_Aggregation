@@ -337,7 +337,7 @@ class CollectionService:
         page: int,
         page_size: int,
     ) -> tuple[list[CollectedInfluencer], int]:
-        query = collected_query_for_viewer(db, viewer).filter(
+        query = collected_query_for_viewer(db, viewer, reviewed_by_self=True).filter(
             CollectedInfluencer.review_status == review_status
         )
         if task_id:

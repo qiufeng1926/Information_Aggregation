@@ -20,6 +20,7 @@ from app.utils.xingtu_fields import (
     parse_dom_text_fields,
     parse_xingtu_item,
     _pick_star_id,
+    _normalize_count,
 )
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,31 @@ class XingtuBrowserCollector:
                 for _ in range(3):
                     page.evaluate("window.scrollBy(0, window.innerHeight)")
                     page.wait_for_timeout(1500)
+
+                table_items = self._parse_market_table(page)
+                for item in table_items:
+                    nickname = str(item.get("nick_name") or item.get("nickname") or "")
+                    uid = str(item.get("author_id") or item.get("star_id") or "")
+                    if not uid and nickname:
+                        matched_uid = next(
+                            (
+                                key
+                                for key, author in authors.items()
+                                if str(_pick(author, NICKNAME_KEYS) or "") == nickname
+                            ),
+                            "",
+                        )
+                        uid = matched_uid
+                    if not uid and not nickname:
+                        continue
+                    if uid:
+                        if uid in authors:
+                            authors[uid] = merge_author_items(authors[uid], item)
+                        else:
+                            seen_ids.add(uid)
+                            authors[uid] = item
+                    elif nickname:
+                        authors[f"_nick:{nickname}"] = item
 
                 if len(authors) < filters.limit:
                     dom_items = self._parse_dom(page)
@@ -331,6 +357,69 @@ class XingtuBrowserCollector:
                 logger.debug("Detail page enrich failed for %s", star_id, exc_info=True)
 
     @staticmethod
+    def _parse_market_table(page) -> list[dict[str, Any]]:
+        """从达人广场列表表格解析达人类型、预期播放量、完播率、成交率等列"""
+        try:
+            rows_data = page.evaluate(
+                """() => {
+                const HEADER_MAP = {
+                    '达人类型': 'creator_type',
+                    '粉丝数': 'follower_count',
+                    '预期播放量': 'expect_play_count',
+                    '互动率': 'interact_rate',
+                    '完播率': 'completion_rate',
+                    '成交率': 'deal_rate',
+                };
+                const results = [];
+                const tables = document.querySelectorAll('table');
+                for (const table of tables) {
+                    let headerCells = table.querySelectorAll('thead th, thead td');
+                    if (!headerCells.length) {
+                        const firstRow = table.querySelector('tr');
+                        if (firstRow) headerCells = firstRow.querySelectorAll('th, td');
+                    }
+                    const headers = Array.from(headerCells).map((c) => c.innerText.trim()).filter(Boolean);
+                    if (!headers.some((h) => h.includes('粉丝') || h.includes('互动率') || h.includes('预期播放'))) {
+                        continue;
+                    }
+                    const colMap = {};
+                    headers.forEach((header, index) => {
+                        for (const [label, key] of Object.entries(HEADER_MAP)) {
+                            if (header === label || header.includes(label)) {
+                                colMap[index] = key;
+                            }
+                        }
+                    });
+                    const bodyRows = table.querySelectorAll('tbody tr');
+                    const rows = bodyRows.length ? bodyRows : Array.from(table.querySelectorAll('tr')).slice(1);
+                    for (const row of rows) {
+                        const cells = row.querySelectorAll('td');
+                        if (cells.length < 3) continue;
+                        const item = {};
+                        cells.forEach((cell, index) => {
+                            const key = colMap[index];
+                            if (key) item[key] = cell.innerText.trim();
+                        });
+                        const firstText = cells[0]?.innerText?.trim().split('\\n').filter(Boolean) || [];
+                        if (firstText.length) item.nick_name = firstText[0];
+                        const link = cells[0]?.querySelector('a[href*="author-homepage"], a[href*="/creator/"]');
+                        if (link) {
+                            const href = link.getAttribute('href') || '';
+                            const match = href.match(/(\\d{11,20})/);
+                            if (match) item.author_id = match[1];
+                        }
+                        if (Object.keys(item).length > 1) results.push(item);
+                    }
+                }
+                return results;
+            }"""
+            )
+            return rows_data if isinstance(rows_data, list) else []
+        except Exception:
+            logger.debug("Market table parse failed", exc_info=True)
+            return []
+
+    @staticmethod
     def _parse_dom(page) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         card_selectors = [
@@ -407,6 +496,8 @@ class XingtuBrowserCollector:
             tag_names.insert(0, keyword)
 
         follower_count = _to_int(_pick(item, FOLLOWER_KEYS))
+        if not follower_count:
+            follower_count = _normalize_count(item.get("follower_count")) or 0
 
         extra = {
             k: v
@@ -429,10 +520,18 @@ class XingtuBrowserCollector:
             engagement_rate = _normalize_engagement_rate(
                 item.get("engagement_rate") or item.get("interact_rate")
             )
-        avg_views = parsed.get("avg_views") or _to_int(_pick(item, AVG_PLAY_KEYS))
+        avg_views = parsed.get("expected_play_count") or parsed.get("avg_views") or _to_int(
+            _pick(item, AVG_PLAY_KEYS)
+        )
+        if not avg_views:
+            avg_views = _normalize_count(item.get("expect_play_count"))
 
         extra_data: dict[str, Any] = {
             "parsed": parsed,
+            "creator_type": parsed.get("creator_type"),
+            "expected_play_count": parsed.get("expected_play_count") or avg_views,
+            "completion_rate": parsed.get("completion_rate"),
+            "deal_rate": parsed.get("deal_rate"),
             "recent_gmv": item.get("gmv_30d") or item.get("sale_amount"),
             "showcase_count": item.get("showcase_count") or item.get("product_count"),
             "quote_min": item.get("quote_min") or item.get("price_min"),
@@ -517,7 +616,15 @@ def _looks_like_author(data: dict) -> bool:
         k in data
         for k in FOLLOWER_KEYS
         + AVG_PLAY_KEYS
-        + ("interact_rate", "engagement_rate", "interaction_rate")
+        + (
+            "interact_rate",
+            "engagement_rate",
+            "interaction_rate",
+            "expect_play_count",
+            "completion_rate",
+            "deal_rate",
+            "creator_type",
+        )
     )
     has_profile = any(k in data for k in ("homepage", "profile_url", "sec_uid", "contact_phone"))
     return has_id and (has_name or has_metric or has_profile)

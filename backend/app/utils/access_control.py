@@ -69,6 +69,8 @@ def can_manage_agencies(user: User) -> bool:
 
 
 def can_review_collected(user: User, task_owner_id: int, task_owner_role: str) -> bool:
+    if task_owner_id == user.id:
+        return True
     if is_super_admin(user):
         return True
     if is_admin(user):
@@ -88,18 +90,16 @@ def can_view_task(db: Session, viewer: User, task_user_id: int, task_owner: User
     if not owner:
         return False
 
-    owner_level = role_level(owner)
-    viewer_lvl = role_level(viewer)
-
     if is_super_admin(viewer):
         return True
 
-    if is_admin(viewer):
-        return owner_level <= ROLE_LEVEL[ADMIN]
-
-    # 普通用户：仅自己的任务；若开启屏蔽则不可看更高级别用户的任务
-    if owner_level > viewer_lvl:
+    owner_role = normalize_role(owner.role)
+    if owner_role == SUPER_ADMIN:
         return False
+
+    if is_admin(viewer):
+        return True
+
     return False
 
 
@@ -113,6 +113,8 @@ def apply_task_query_scope(db: Session, query: Query, viewer: User) -> Query:
 
 
 def task_query_for_viewer(db: Session, viewer: User):
+    from sqlalchemy import or_
+
     from app.models import CollectionTask
 
     query = db.query(CollectionTask)
@@ -124,29 +126,44 @@ def task_query_for_viewer(db: Session, viewer: User):
             row[0] for row in db.query(User.id).filter(User.role == SUPER_ADMIN).all()
         ]
         if super_admin_ids:
-            return query.filter(~CollectionTask.user_id.in_(super_admin_ids))
+            return query.filter(
+                or_(
+                    CollectionTask.user_id == viewer.id,
+                    ~CollectionTask.user_id.in_(super_admin_ids),
+                )
+            )
         return query
 
     return query.filter(CollectionTask.user_id == viewer.id)
 
 
-def collected_query_for_viewer(db: Session, viewer: User):
+def collected_query_for_viewer(db: Session, viewer: User, *, reviewed_by_self: bool = False):
+    from sqlalchemy import or_
+
     from app.models import CollectionTask, CollectedInfluencer
 
     query = db.query(CollectedInfluencer)
     if is_super_admin(viewer):
-        return query
+        q = query
+    else:
+        q = query.join(CollectionTask, CollectedInfluencer.task_id == CollectionTask.id)
+        if is_admin(viewer):
+            super_admin_ids = [
+                row[0] for row in db.query(User.id).filter(User.role == SUPER_ADMIN).all()
+            ]
+            if super_admin_ids:
+                q = q.filter(
+                    or_(
+                        CollectionTask.user_id == viewer.id,
+                        ~CollectionTask.user_id.in_(super_admin_ids),
+                    )
+                )
+        else:
+            q = q.filter(CollectionTask.user_id == viewer.id)
 
-    if is_admin(viewer):
-        super_admin_ids = [
-            row[0] for row in db.query(User.id).filter(User.role == SUPER_ADMIN).all()
-        ]
-        q = query.join(CollectionTask)
-        if super_admin_ids:
-            q = q.filter(~CollectionTask.user_id.in_(super_admin_ids))
-        return q
-
-    return query.join(CollectionTask).filter(CollectionTask.user_id == viewer.id)
+    if reviewed_by_self and is_user(viewer):
+        q = q.filter(CollectedInfluencer.reviewed_by == viewer.id)
+    return q
 
 
 def match_query_for_viewer(db: Session, viewer: User):
@@ -166,7 +183,7 @@ def match_query_for_viewer(db: Session, viewer: User):
 
 
 def influencer_ids_for_user(db: Session, user_id: int) -> set[int]:
-    """普通用户可查看的达人 ID（来自其已通过审核的采集）"""
+    """普通用户可查看的达人 ID（自己采集且自己审核通过）"""
     from app.models import CollectedInfluencer, CollectionTask
 
     rows = (
@@ -175,6 +192,7 @@ def influencer_ids_for_user(db: Session, user_id: int) -> set[int]:
         .filter(
             CollectionTask.user_id == user_id,
             CollectedInfluencer.review_status == "approved",
+            CollectedInfluencer.reviewed_by == user_id,
             CollectedInfluencer.influencer_id.isnot(None),
         )
         .all()

@@ -23,12 +23,14 @@
       </template>
     </div>
 
-    <el-table
-      v-loading="loading"
-      :data="list"
-      stripe
-      @selection-change="handleSelectionChange"
-    >
+    <div class="table-scroll">
+      <el-table
+        v-loading="loading"
+        :data="list"
+        row-key="id"
+        stripe
+        @selection-change="handleSelectionChange"
+      >
       <el-table-column v-if="activeTab === 'pending'" type="selection" width="50" />
       <el-table-column label="头像" width="70">
         <template #default="{ row }">
@@ -49,14 +51,33 @@
       <el-table-column label="粉丝量" width="100">
         <template #default="{ row }">{{ formatFollowers(row.follower_count) }}</template>
       </el-table-column>
+      <el-table-column label="达人类型" width="100" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.creator_type || '-' }}</template>
+      </el-table-column>
+      <el-table-column label="预期播放" width="100">
+        <template #default="{ row }">
+          {{ formatFollowers(row.expected_play_count ?? row.avg_views) }}
+        </template>
+      </el-table-column>
       <el-table-column label="匹配度" width="90">
         <template #default="{ row }">
-          <el-tag type="success">{{ row.match_score }}分</el-tag>
+          <el-tag v-if="row.match_score != null" type="success">{{ row.match_score }}分</el-tag>
+          <span v-else>-</span>
         </template>
       </el-table-column>
       <el-table-column label="互动率" width="90">
         <template #default="{ row }">
           {{ row.engagement_rate != null ? `${(row.engagement_rate * 100).toFixed(2)}%` : '-' }}
+        </template>
+      </el-table-column>
+      <el-table-column label="完播率" width="90">
+        <template #default="{ row }">
+          {{ formatRate(row.completion_rate) }}
+        </template>
+      </el-table-column>
+      <el-table-column label="成交率" width="90">
+        <template #default="{ row }">
+          {{ formatRate(row.deal_rate) }}
         </template>
       </el-table-column>
       <el-table-column label="MCN机构" width="130" show-overflow-tooltip>
@@ -78,7 +99,8 @@
           </template>
         </template>
       </el-table-column>
-    </el-table>
+      </el-table>
+    </div>
 
     <div class="pagination">
       <el-pagination
@@ -86,7 +108,8 @@
         v-model:page-size="pagination.page_size"
         :total="pagination.total"
         layout="total, prev, pager, next"
-        @change="loadData"
+        @current-change="loadData"
+        @size-change="loadData"
       />
     </div>
 
@@ -104,12 +127,24 @@
 
         <el-descriptions :column="1" border size="small">
           <el-descriptions-item label="粉丝量">{{ formatFollowers(currentItem.follower_count) }}</el-descriptions-item>
+          <el-descriptions-item label="达人类型">
+            {{ currentItem.creator_type || parsedData.creator_type || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="预期播放量">
+            {{ formatFollowers(currentItem.expected_play_count ?? currentItem.avg_views) }}
+          </el-descriptions-item>
           <el-descriptions-item label="互动率">
             {{
               currentItem.engagement_rate != null
                 ? `${(currentItem.engagement_rate * 100).toFixed(2)}%`
                 : '-'
             }}
+          </el-descriptions-item>
+          <el-descriptions-item label="完播率">
+            {{ formatRate(currentItem.completion_rate ?? (parsedData.completion_rate as number | undefined)) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="成交率">
+            {{ formatRate(currentItem.deal_rate ?? (parsedData.deal_rate as number | undefined)) }}
           </el-descriptions-item>
           <el-descriptions-item label="平均播放" v-if="currentItem.avg_views">
             {{ formatFollowers(currentItem.avg_views) }}
@@ -234,6 +269,11 @@ function formatGender(value: string | undefined) {
   return value
 }
 
+function formatRate(value: number | null | undefined) {
+  if (value == null) return '-'
+  return `${(value * 100).toFixed(2)}%`
+}
+
 function handleSelectionChange(rows: CollectedInfluencer[]) {
   selectedIds.value = rows.map((r) => r.id)
 }
@@ -345,5 +385,10 @@ onMounted(async () => {
   margin-top: 20px;
   display: flex;
   gap: 12px;
+}
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
 }
 </style>
