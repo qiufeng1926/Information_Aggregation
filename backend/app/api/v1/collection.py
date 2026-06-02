@@ -1,6 +1,7 @@
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+import json
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import AdminUser, CurrentUser, DbSession
 from app.schemas import PageResult, ResponseBase
 from app.schemas.collection import (
     CollectionTaskCreate,
@@ -9,10 +10,10 @@ from app.schemas.collection import (
     CollectedInfluencerOut,
     ReviewAction,
     ReviewResult,
+    SessionCookieImport,
 )
 from app.services.collection_service import CollectionService, ERROR_CATEGORY_LABELS
 from app.services.session_service import SessionService
-from app.utils.access_control import is_admin
 from app.utils.filter_summary import build_filter_summary
 from app.utils.collected_parsed import is_valid_profile_url, parse_collected_parsed
 from app.utils.mcn_utils import extract_mcn_name
@@ -72,12 +73,12 @@ def get_collection_config(_: CurrentUser, platform: str = Query("douyin")):
 
 
 @router.get("/sessions", response_model=ResponseBase[list])
-def list_collection_sessions(_: CurrentUser):
+def list_collection_sessions(_: AdminUser):
     return ResponseBase(data=SessionService.list_sessions())
 
 
 @router.post("/sessions/{platform}/login/start", response_model=ResponseBase[dict])
-def start_platform_login(_: CurrentUser, platform: str):
+def start_platform_login(_: AdminUser, platform: str):
     try:
         return ResponseBase(data=SessionService.start_login(platform), message="浏览器已打开，请完成登录")
     except ValueError as exc:
@@ -87,7 +88,7 @@ def start_platform_login(_: CurrentUser, platform: str):
 
 
 @router.post("/sessions/{platform}/login/save", response_model=ResponseBase[dict])
-def save_platform_login(_: CurrentUser, platform: str):
+def save_platform_login(_: AdminUser, platform: str):
     try:
         return ResponseBase(data=SessionService.save_login(platform), message="登录态已保存")
     except ValueError as exc:
@@ -95,12 +96,23 @@ def save_platform_login(_: CurrentUser, platform: str):
 
 
 @router.post("/sessions/{platform}/login/cancel", response_model=ResponseBase[dict])
-def cancel_platform_login(_: CurrentUser, platform: str):
+def cancel_platform_login(_: AdminUser, platform: str):
     return ResponseBase(data=SessionService.cancel_login(platform), message="已取消登录流程")
 
 
+@router.post("/sessions/{platform}/import", response_model=ResponseBase[dict])
+def import_platform_cookies(_: AdminUser, platform: str, data: SessionCookieImport):
+    try:
+        return ResponseBase(
+            data=SessionService.import_cookies(platform, data.content),
+            message="远程登录态已保存",
+        )
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.post("/sessions/{platform}/upload", response_model=ResponseBase[dict])
-async def upload_platform_session(_: CurrentUser, platform: str, file: UploadFile = File(...)):
+async def upload_platform_session(_: AdminUser, platform: str, file: UploadFile = File(...)):
     try:
         content = await file.read()
         return ResponseBase(
@@ -112,13 +124,13 @@ async def upload_platform_session(_: CurrentUser, platform: str, file: UploadFil
 
 
 @router.delete("/sessions/{platform}", response_model=ResponseBase[dict])
-def delete_platform_session(_: CurrentUser, platform: str):
+def delete_platform_session(_: AdminUser, platform: str):
     return ResponseBase(data=SessionService.delete_storage_state(platform), message="登录态已清除")
 
 
 @router.get("/stats", response_model=ResponseBase[dict])
 def get_collection_stats(db: DbSession, user: CurrentUser):
-    return ResponseBase(data=CollectionService.get_stats(db, user.id, is_admin(user)))
+    return ResponseBase(data=CollectionService.get_stats(db, user))
 
 
 @router.get("/filter-options", response_model=ResponseBase[dict])
@@ -150,7 +162,7 @@ def list_collection_tasks(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
-    items, total = CollectionService.list_tasks(db, user.id, is_admin(user), page, page_size)
+    items, total = CollectionService.list_tasks(db, user, page, page_size)
     return ResponseBase(
         data=PageResult(
             items=[_task_out(i) for i in items],
@@ -163,7 +175,7 @@ def list_collection_tasks(
 
 @router.get("/tasks/{task_id}", response_model=ResponseBase[CollectionTaskOut])
 def get_collection_task(db: DbSession, user: CurrentUser, task_id: int):
-    task = CollectionService.get_task(db, task_id, user.id, is_admin(user))
+    task = CollectionService.get_task(db, task_id, user)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
     return ResponseBase(data=_task_out(task))
@@ -171,7 +183,7 @@ def get_collection_task(db: DbSession, user: CurrentUser, task_id: int):
 
 @router.get("/tasks/{task_id}/detail", response_model=ResponseBase[CollectionTaskDetailOut])
 def get_collection_task_detail(db: DbSession, user: CurrentUser, task_id: int):
-    detail = CollectionService.get_task_detail(db, task_id, user.id, is_admin(user))
+    detail = CollectionService.get_task_detail(db, task_id, user)
     if not detail:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
 
@@ -194,7 +206,7 @@ def get_collection_task_detail(db: DbSession, user: CurrentUser, task_id: int):
 
 @router.post("/tasks/{task_id}/retry", response_model=ResponseBase[CollectionTaskOut])
 def retry_collection_task(db: DbSession, user: CurrentUser, task_id: int):
-    task = CollectionService.get_task(db, task_id, user.id, is_admin(user))
+    task = CollectionService.get_task(db, task_id, user)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
     if task.status == "running":
@@ -217,7 +229,7 @@ def list_pending_review(
     page_size: int = Query(20, ge=1, le=100),
 ):
     items, total, library_map = CollectionService.list_pending(
-        db, user.id, is_admin(user), task_id, page, page_size
+        db, user, task_id, page, page_size
     )
     return ResponseBase(
         data=PageResult(
@@ -239,7 +251,7 @@ def list_reviewed(
     page_size: int = Query(20, ge=1, le=100),
 ):
     items, total = CollectionService.list_reviewed(
-        db, user.id, is_admin(user), review_status, task_id, page, page_size
+        db, user, review_status, task_id, page, page_size
     )
     return ResponseBase(
         data=PageResult(
@@ -253,11 +265,11 @@ def list_reviewed(
 
 @router.post("/approve", response_model=ResponseBase[ReviewResult])
 def approve_collected(db: DbSession, user: CurrentUser, data: ReviewAction):
-    result = CollectionService.approve_items(db, data.ids, user.id, is_admin(user))
+    result = CollectionService.approve_items(db, data.ids, user)
     return ResponseBase(data=result, message=f"已通过 {result.approved} 条")
 
 
 @router.post("/reject", response_model=ResponseBase[ReviewResult])
 def reject_collected(db: DbSession, user: CurrentUser, data: ReviewAction):
-    result = CollectionService.reject_items(db, data.ids, user.id, is_admin(user))
+    result = CollectionService.reject_items(db, data.ids, user)
     return ResponseBase(data=result, message=f"已拒绝 {result.rejected} 条")

@@ -41,6 +41,7 @@ class UserInfo(BaseModel):
     username: str
     nickname: str | None
     role: str
+    view_library: bool = False
 
 
 class TagBrief(BaseModel):

@@ -5,11 +5,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from app.api.v1 import auth, agencies, collection, influencers, match, tags
+from app.api.v1 import auth, agencies, collection, influencers, match, permissions, tags, users
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.middleware.request_log import RequestLogMiddleware
 from app.models import User
+from app.models.permission import SystemSetting
+from app.constants.roles import SUPER_ADMIN
+from app.utils.access_control import SETTING_BLOCK_UPPER_TASKS
 from app.utils.security import get_password_hash
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -32,6 +35,29 @@ def log_collect_env():
     print("=" * 60 + "\n")
 
 
+def migrate_rbac(db: Session) -> None:
+    from sqlalchemy import inspect, text
+
+    try:
+        inspector = inspect(engine)
+        if "users" in inspector.get_table_names():
+            cols = {c["name"] for c in inspector.get_columns("users")}
+            if "view_library" not in cols:
+                db.execute(text("ALTER TABLE users ADD COLUMN view_library TINYINT DEFAULT 0"))
+        db.execute(text("UPDATE users SET role='user' WHERE role='operator'"))
+        if db.query(User).filter(User.role == SUPER_ADMIN).count() == 0:
+            first_admin = db.query(User).filter(User.role == "admin").order_by(User.id.asc()).first()
+            if first_admin:
+                first_admin.role = SUPER_ADMIN
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    if not db.query(SystemSetting).filter(SystemSetting.key == SETTING_BLOCK_UPPER_TASKS).first():
+        db.add(SystemSetting(key=SETTING_BLOCK_UPPER_TASKS, value="true"))
+        db.commit()
+
+
 def init_db():
     try:
         Base.metadata.create_all(bind=engine)
@@ -44,6 +70,7 @@ def init_db():
         raise exc
     db: Session = SessionLocal()
     try:
+        migrate_rbac(db)
         has_users = db.query(User).count() > 0
         if not has_users:
             username = settings.ADMIN_USERNAME.strip()
@@ -54,12 +81,13 @@ def init_db():
                 admin = User(
                     username=username,
                     password_hash=get_password_hash(password),
-                    nickname="管理员",
-                    role="admin",
+                    nickname="超级管理员",
+                    role=SUPER_ADMIN,
+                    view_library=1,
                 )
                 db.add(admin)
                 db.commit()
-                print(f"已创建管理员账号: {username}")
+                print(f"已创建超级管理员账号: {username}")
             else:
                 print("\n" + "!" * 60)
                 print("警告: 系统中尚无用户，且未配置 ADMIN_USERNAME / ADMIN_PASSWORD")
@@ -111,6 +139,8 @@ app.include_router(influencers.router, prefix="/api/v1")
 app.include_router(collection.router, prefix="/api/v1")
 app.include_router(tags.router, prefix="/api/v1")
 app.include_router(agencies.router, prefix="/api/v1")
+app.include_router(users.router, prefix="/api/v1")
+app.include_router(permissions.router, prefix="/api/v1")
 app.include_router(match.router, prefix="/api/v1")
 
 

@@ -8,7 +8,12 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.collectors.registry import get_collector
-from app.models import CollectedInfluencer, CollectionTask, Influencer
+from app.models import CollectedInfluencer, CollectionTask, Influencer, User
+from app.utils.access_control import (
+    can_view_task,
+    collected_query_for_viewer,
+    task_query_for_viewer,
+)
 from app.schemas.collection import CollectionTaskCreate, ReviewResult
 from app.schemas import InfluencerCreate, InfluencerUpdate
 from app.services.agency_service import AgencyService
@@ -212,15 +217,11 @@ class CollectionService:
     @staticmethod
     def list_tasks(
         db: Session,
-        user_id: int,
-        is_admin: bool,
+        viewer: User,
         page: int,
         page_size: int,
     ) -> tuple[list[CollectionTask], int]:
-        query = db.query(CollectionTask)
-        if not is_admin:
-            query = query.filter(CollectionTask.user_id == user_id)
-        query = query.order_by(CollectionTask.created_at.desc())
+        query = task_query_for_viewer(db, viewer).order_by(CollectionTask.created_at.desc())
         total = query.count()
         items = query.offset((page - 1) * page_size).limit(page_size).all()
         return items, total
@@ -229,22 +230,20 @@ class CollectionService:
     def get_task(
         db: Session,
         task_id: int,
-        user_id: int | None = None,
-        is_admin: bool = True,
+        viewer: User,
     ) -> CollectionTask | None:
-        query = db.query(CollectionTask).filter(CollectionTask.id == task_id)
-        if not is_admin and user_id is not None:
-            query = query.filter(CollectionTask.user_id == user_id)
-        return query.first()
+        task = db.query(CollectionTask).filter(CollectionTask.id == task_id).first()
+        if not task or not can_view_task(db, viewer, task.user_id):
+            return None
+        return task
 
     @staticmethod
     def get_task_detail(
         db: Session,
         task_id: int,
-        user_id: int,
-        is_admin: bool,
+        viewer: User,
     ) -> dict | None:
-        task = CollectionService.get_task(db, task_id, user_id, is_admin)
+        task = CollectionService.get_task(db, task_id, viewer)
         if not task:
             return None
 
@@ -304,33 +303,24 @@ class CollectionService:
         return result
 
     @staticmethod
-    def _collected_query_for_user(
-        db: Session,
-        user_id: int,
-        is_admin: bool,
-    ):
-        query = db.query(CollectedInfluencer)
-        if not is_admin:
-            query = query.join(CollectionTask).filter(CollectionTask.user_id == user_id)
-        return query
+    def _collected_query_for_viewer(db: Session, viewer: User):
+        return collected_query_for_viewer(db, viewer)
 
     @staticmethod
     def list_pending(
         db: Session,
-        user_id: int,
-        is_admin: bool,
+        viewer: User,
         task_id: int | None,
         page: int,
         page_size: int,
     ) -> tuple[list[CollectedInfluencer], int, dict[str, int]]:
-        query = CollectionService._collected_query_for_user(db, user_id, is_admin).filter(
+        query = collected_query_for_viewer(db, viewer).filter(
             CollectedInfluencer.review_status == "pending"
         )
         if task_id:
-            if not is_admin:
-                task = CollectionService.get_task(db, task_id, user_id, is_admin=False)
-                if not task:
-                    return [], 0, {}
+            task = CollectionService.get_task(db, task_id, viewer)
+            if not task:
+                return [], 0, {}
             query = query.filter(CollectedInfluencer.task_id == task_id)
         query = query.order_by(CollectedInfluencer.match_score.desc())
         total = query.count()
@@ -341,21 +331,19 @@ class CollectionService:
     @staticmethod
     def list_reviewed(
         db: Session,
-        user_id: int,
-        is_admin: bool,
+        viewer: User,
         review_status: str,
         task_id: int | None,
         page: int,
         page_size: int,
     ) -> tuple[list[CollectedInfluencer], int]:
-        query = CollectionService._collected_query_for_user(db, user_id, is_admin).filter(
+        query = collected_query_for_viewer(db, viewer).filter(
             CollectedInfluencer.review_status == review_status
         )
         if task_id:
-            if not is_admin:
-                task = CollectionService.get_task(db, task_id, user_id, is_admin=False)
-                if not task:
-                    return [], 0
+            task = CollectionService.get_task(db, task_id, viewer)
+            if not task:
+                return [], 0
             query = query.filter(CollectedInfluencer.task_id == task_id)
         query = query.order_by(CollectedInfluencer.reviewed_at.desc())
         total = query.count()
@@ -366,19 +354,13 @@ class CollectionService:
     def approve_items(
         db: Session,
         ids: list[int],
-        user_id: int,
-        is_admin: bool,
+        viewer: User,
     ) -> ReviewResult:
         result = ReviewResult()
-        query = (
-            db.query(CollectedInfluencer)
-            .filter(
-                CollectedInfluencer.id.in_(ids),
-                CollectedInfluencer.review_status == "pending",
-            )
+        query = collected_query_for_viewer(db, viewer).filter(
+            CollectedInfluencer.id.in_(ids),
+            CollectedInfluencer.review_status == "pending",
         )
-        if not is_admin:
-            query = query.join(CollectionTask).filter(CollectionTask.user_id == user_id)
         items = query.all()
 
         task_ids: set[int] = set()
@@ -430,7 +412,7 @@ class CollectionService:
 
             item.influencer_id = influencer_id
             item.review_status = "approved"
-            item.reviewed_by = user_id
+            item.reviewed_by = viewer.id
             item.reviewed_at = datetime.now()
             task_ids.add(item.task_id)
             result.approved += 1
@@ -456,23 +438,17 @@ class CollectionService:
     def reject_items(
         db: Session,
         ids: list[int],
-        user_id: int,
-        is_admin: bool,
+        viewer: User,
     ) -> ReviewResult:
         result = ReviewResult()
-        query = (
-            db.query(CollectedInfluencer)
-            .filter(
-                CollectedInfluencer.id.in_(ids),
-                CollectedInfluencer.review_status == "pending",
-            )
+        query = collected_query_for_viewer(db, viewer).filter(
+            CollectedInfluencer.id.in_(ids),
+            CollectedInfluencer.review_status == "pending",
         )
-        if not is_admin:
-            query = query.join(CollectionTask).filter(CollectionTask.user_id == user_id)
         items = query.all()
         for item in items:
             item.review_status = "rejected"
-            item.reviewed_by = user_id
+            item.reviewed_by = viewer.id
             item.reviewed_at = datetime.now()
             result.rejected += 1
 
@@ -481,23 +457,20 @@ class CollectionService:
         return result
 
     @staticmethod
-    def get_stats(db: Session, user_id: int, is_admin: bool) -> dict:
+    def get_stats(db: Session, viewer: User) -> dict:
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
-        pending_query = CollectionService._collected_query_for_user(db, user_id, is_admin).filter(
+        pending_query = collected_query_for_viewer(db, viewer).filter(
             CollectedInfluencer.review_status == "pending"
         )
         pending_review = pending_query.count()
 
-        def owned_tasks():
-            q = db.query(CollectionTask)
-            if not is_admin:
-                q = q.filter(CollectionTask.user_id == user_id)
-            return q
+        def scoped_tasks():
+            return task_query_for_viewer(db, viewer)
 
-        today_tasks = owned_tasks().filter(CollectionTask.created_at >= today_start).count()
+        today_tasks = scoped_tasks().filter(CollectionTask.created_at >= today_start).count()
         today_collected = (
-            owned_tasks()
+            scoped_tasks()
             .filter(
                 CollectionTask.created_at >= today_start,
                 CollectionTask.status == "completed",
@@ -505,13 +478,13 @@ class CollectionService:
             .with_entities(func.coalesce(func.sum(CollectionTask.result_count), 0))
             .scalar()
         )
-        completed = owned_tasks().filter(CollectionTask.status == "completed").count()
-        failed = owned_tasks().filter(CollectionTask.status == "failed").count()
+        completed = scoped_tasks().filter(CollectionTask.status == "completed").count()
+        failed = scoped_tasks().filter(CollectionTask.status == "failed").count()
         finished = completed + failed
         success_rate = round(completed / finished * 100, 1) if finished else 100.0
 
-        running = owned_tasks().filter(CollectionTask.status == "running").first()
-        queued = owned_tasks().filter(CollectionTask.status == "pending").count()
+        running = scoped_tasks().filter(CollectionTask.status == "running").first()
+        queued = scoped_tasks().filter(CollectionTask.status == "pending").count()
 
         from app.services.collection_queue import queue_size, running_task_id
 

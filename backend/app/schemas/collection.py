@@ -122,3 +122,9 @@ class ReviewResult(BaseModel):
     approved: int = 0
     rejected: int = 0
     skipped: int = 0
+
+
+class SessionCookieImport(BaseModel):
+    """远程设备粘贴 Cookie 后导入为 Playwright 登录态"""
+
+    content: str = Field(..., min_length=10, max_length=500_000, description="Cookie 请求头或 JSON")

@@ -21,9 +21,9 @@
 
     <el-divider />
 
-    <CollectionSessionPanel />
+    <CollectionSessionPanel v-if="showSessions" />
 
-    <el-divider />
+    <el-divider v-if="showSessions" />
 
     <el-alert
       v-if="stats.runningTaskId"
@@ -36,24 +36,46 @@
 
     <div class="welcome">
       <h3>欢迎使用达人信息聚合系统</h3>
-      <p>Phase 5：智能匹配已上线。采集前请在工作台配置星图 / 蒲公英登录态。</p>
+      <p>{{ welcomeText }}</p>
       <el-space wrap>
         <el-button type="primary" @click="$router.push('/collection')">发起采集</el-button>
         <el-button type="success" @click="$router.push('/review')">待审核列表</el-button>
-        <el-button type="warning" @click="$router.push('/match')">智能匹配</el-button>
-        <el-button @click="$router.push('/influencers')">达人库</el-button>
-        <el-button @click="$router.push('/tags')">标签管理</el-button>
-        <el-button @click="$router.push('/agencies')">MCN机构</el-button>
+        <el-button v-if="showAdminActions" type="warning" @click="$router.push('/match')">智能匹配</el-button>
+        <el-button @click="$router.push('/influencers')">{{ influencerBtnLabel }}</el-button>
+        <el-button v-if="showAdminActions" @click="$router.push('/tags')">标签管理</el-button>
+        <el-button v-if="showAdminActions" @click="$router.push('/agencies')">MCN机构</el-button>
+        <el-button v-if="showUserManage" @click="$router.push('/users')">用户管理</el-button>
+        <el-button v-if="showAccessReview" @click="$router.push('/access-review')">权限审核</el-button>
       </el-space>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive } from 'vue'
+import { computed, onMounted, reactive } from 'vue'
 import CollectionSessionPanel from '@/components/CollectionSessionPanel.vue'
 import { getCollectionStats } from '@/api/collection'
 import { getInfluencers } from '@/api/influencer'
+import { useUserStore } from '@/stores/user'
+import {
+  canManageSessions,
+  canManageUsers,
+  canReviewAccess,
+  canUseMatch,
+  isUser,
+} from '@/utils/permission'
+
+const userStore = useUserStore()
+const showSessions = computed(() => canManageSessions(userStore.userInfo?.role))
+const showAdminActions = computed(() => canUseMatch(userStore.userInfo?.role))
+const showUserManage = computed(() => canManageUsers(userStore.userInfo?.role))
+const showAccessReview = computed(() => canReviewAccess(userStore.userInfo?.role))
+const influencerBtnLabel = computed(() => (isUser(userStore.userInfo?.role) ? '我的达人' : '达人库'))
+const welcomeText = computed(() =>
+  isUser(userStore.userInfo?.role)
+    ? '您可以使用自动采集、审核自己的采集结果，并在「我的达人」中查看已通过审核的达人。'
+    : '采集前请在工作台配置星图 / 蒲公英登录态；管理员可在「权限审核」中审批普通用户的查阅申请。'
+)
 
 const stats = reactive({
   influencerTotal: 0,
@@ -77,7 +99,10 @@ async function loadStats() {
   stats.queuedTasks = collection.data.queued_tasks
 }
 
-onMounted(loadStats)
+onMounted(async () => {
+  await userStore.fetchUserInfo()
+  loadStats()
+})
 </script>
 
 <style scoped>

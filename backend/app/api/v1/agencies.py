@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query, status
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import AdminUser, CurrentUser, DbSession
 from app.schemas import PageResult, ResponseBase
 from app.schemas.agency import AgencyCreate, AgencyDetailOut, AgencyOut, AgencyUpdate
 from app.services.agency_service import AgencyService
@@ -27,7 +27,7 @@ def _agency_out(agency, stats: dict | None = None) -> AgencyOut:
 
 
 @router.get("/options", response_model=ResponseBase[list[AgencyOut]])
-def list_agency_options(db: DbSession, _: CurrentUser):
+def list_agency_options(db: DbSession, _: AdminUser):
     items = AgencyService.list_options(db)
     stats = AgencyService.get_stats_map(db)
     return ResponseBase(data=[_agency_out(a, stats.get(a.id)) for a in items])
@@ -36,7 +36,7 @@ def list_agency_options(db: DbSession, _: CurrentUser):
 @router.get("", response_model=ResponseBase[PageResult[AgencyOut]])
 def list_agencies(
     db: DbSession,
-    _: CurrentUser,
+    _: AdminUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = None,
@@ -54,7 +54,7 @@ def list_agencies(
 
 
 @router.get("/{agency_id}", response_model=ResponseBase[AgencyDetailOut])
-def get_agency(db: DbSession, _: CurrentUser, agency_id: int):
+def get_agency(db: DbSession, _: AdminUser, agency_id: int):
     agency = AgencyService.get_by_id(db, agency_id)
     if not agency:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="机构不存在")
@@ -68,7 +68,7 @@ def get_agency(db: DbSession, _: CurrentUser, agency_id: int):
 
 
 @router.post("", response_model=ResponseBase[AgencyOut], status_code=status.HTTP_201_CREATED)
-def create_agency(db: DbSession, _: CurrentUser, data: AgencyCreate):
+def create_agency(db: DbSession, _: AdminUser, data: AgencyCreate):
     try:
         agency = AgencyService.create(db, data)
     except ValueError as exc:
@@ -77,7 +77,7 @@ def create_agency(db: DbSession, _: CurrentUser, data: AgencyCreate):
 
 
 @router.put("/{agency_id}", response_model=ResponseBase[AgencyOut])
-def update_agency(db: DbSession, _: CurrentUser, agency_id: int, data: AgencyUpdate):
+def update_agency(db: DbSession, _: AdminUser, agency_id: int, data: AgencyUpdate):
     agency = AgencyService.get_by_id(db, agency_id)
     if not agency:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="机构不存在")
@@ -90,7 +90,7 @@ def update_agency(db: DbSession, _: CurrentUser, agency_id: int, data: AgencyUpd
 
 
 @router.delete("/{agency_id}", response_model=ResponseBase[None])
-def delete_agency(db: DbSession, _: CurrentUser, agency_id: int):
+def delete_agency(db: DbSession, _: AdminUser, agency_id: int):
     agency = AgencyService.get_by_id(db, agency_id)
     if not agency:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="机构不存在")
@@ -101,7 +101,7 @@ def delete_agency(db: DbSession, _: CurrentUser, agency_id: int):
 @router.get("/{agency_id}/influencers", response_model=ResponseBase[PageResult[dict]])
 def list_agency_influencers(
     db: DbSession,
-    _: CurrentUser,
+    _: AdminUser,
     agency_id: int,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),

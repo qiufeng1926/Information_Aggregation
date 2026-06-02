@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '@/layouts/MainLayout.vue'
+import { useUserStore } from '@/stores/user'
+import { normalizeRole, ROLES } from '@/utils/permission'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -49,44 +51,79 @@ const router = createRouter({
           path: 'tags',
           name: 'TagManage',
           component: () => import('@/views/TagManage.vue'),
-          meta: { title: '标签管理' },
+          meta: { title: '标签管理', roles: [ROLES.ADMIN, ROLES.SUPER_ADMIN] },
         },
         {
           path: 'match',
           name: 'MatchList',
           component: () => import('@/views/MatchList.vue'),
-          meta: { title: '智能匹配' },
+          meta: { title: '智能匹配', roles: [ROLES.ADMIN, ROLES.SUPER_ADMIN] },
         },
         {
           path: 'match/:id',
           name: 'MatchDetail',
           component: () => import('@/views/MatchDetail.vue'),
-          meta: { title: '匹配结果' },
+          meta: { title: '匹配结果', roles: [ROLES.ADMIN, ROLES.SUPER_ADMIN] },
         },
         {
           path: 'agencies',
           name: 'AgencyList',
           component: () => import('@/views/AgencyList.vue'),
-          meta: { title: 'MCN机构' },
+          meta: { title: 'MCN机构', roles: [ROLES.ADMIN, ROLES.SUPER_ADMIN] },
         },
         {
           path: 'agencies/:id',
           name: 'AgencyDetail',
           component: () => import('@/views/AgencyDetail.vue'),
-          meta: { title: '机构详情' },
+          meta: { title: '机构详情', roles: [ROLES.ADMIN, ROLES.SUPER_ADMIN] },
+        },
+        {
+          path: 'users',
+          name: 'UserManage',
+          component: () => import('@/views/UserManage.vue'),
+          meta: { title: '用户管理', roles: [ROLES.SUPER_ADMIN] },
+        },
+        {
+          path: 'access-review',
+          name: 'AccessReview',
+          component: () => import('@/views/AccessReview.vue'),
+          meta: { title: '权限审核', roles: [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.USER] },
         },
       ],
     },
   ],
 })
 
-router.beforeEach((to) => {
+function canAccessRoute(requiredRoles: string[] | undefined, role: string) {
+  if (!requiredRoles?.length) return true
+  if (role === ROLES.SUPER_ADMIN) return true
+  return requiredRoles.includes(role)
+}
+
+router.beforeEach(async (to) => {
   const token = localStorage.getItem('token')
   if (!to.meta.public && !token) {
     return '/login'
   }
   if (to.path === '/login' && token) {
     return '/dashboard'
+  }
+
+  const requiredRoles = to.meta.roles as string[] | undefined
+  if (token && requiredRoles?.length) {
+    const store = useUserStore()
+    if (!store.userInfo) {
+      try {
+        await store.fetchUserInfo()
+      } catch {
+        store.logout()
+        return '/login'
+      }
+    }
+    const role = normalizeRole(store.userInfo?.role)
+    if (!canAccessRoute(requiredRoles, role)) {
+      return '/dashboard'
+    }
   }
 })
 

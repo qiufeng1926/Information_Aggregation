@@ -1,6 +1,6 @@
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, status
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import AdminUser, CurrentUser, DbSession
 from app.schemas import (
     ImportResult,
     InfluencerCreate,
@@ -13,6 +13,7 @@ from app.schemas import (
     TagBrief,
 )
 from app.services.influencer_service import InfluencerService
+from app.utils.access_control import can_view_full_library, influencer_ids_for_user
 
 router = APIRouter(prefix="/influencers", tags=["达人管理"])
 
@@ -46,10 +47,19 @@ def _to_out(influencer) -> InfluencerOut:
     )
 
 
+def _ensure_influencer_access(db, user, influencer_id: int):
+    if can_view_full_library(user):
+        return InfluencerService.get_by_id(db, influencer_id)
+    allowed = influencer_ids_for_user(db, user.id)
+    if influencer_id not in allowed:
+        return None
+    return InfluencerService.get_by_id(db, influencer_id)
+
+
 @router.get("", response_model=ResponseBase[PageResult[InfluencerOut]])
 def list_influencers(
     db: DbSession,
-    _: CurrentUser,
+    user: CurrentUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     platform: str | None = None,
@@ -71,7 +81,7 @@ def list_influencers(
         agency_id=agency_id,
         status=status,
     )
-    items, total = InfluencerService.list_influencers(db, filters, page, page_size)
+    items, total = InfluencerService.list_influencers(db, filters, page, page_size, viewer=user)
     return ResponseBase(
         data=PageResult(
             items=[_to_out(item) for item in items],
@@ -83,15 +93,15 @@ def list_influencers(
 
 
 @router.get("/{influencer_id}", response_model=ResponseBase[InfluencerOut])
-def get_influencer(db: DbSession, _: CurrentUser, influencer_id: int):
-    influencer = InfluencerService.get_by_id(db, influencer_id)
+def get_influencer(db: DbSession, user: CurrentUser, influencer_id: int):
+    influencer = _ensure_influencer_access(db, user, influencer_id)
     if not influencer:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="达人不存在")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="达人不存在或无权查看")
     return ResponseBase(data=_to_out(influencer))
 
 
 @router.post("", response_model=ResponseBase[InfluencerOut], status_code=status.HTTP_201_CREATED)
-def create_influencer(db: DbSession, _: CurrentUser, data: InfluencerCreate):
+def create_influencer(db: DbSession, _: AdminUser, data: InfluencerCreate):
     try:
         influencer = InfluencerService.create(db, data)
     except ValueError as exc:
@@ -101,7 +111,7 @@ def create_influencer(db: DbSession, _: CurrentUser, data: InfluencerCreate):
 
 @router.put("/{influencer_id}", response_model=ResponseBase[InfluencerOut])
 def update_influencer(
-    db: DbSession, _: CurrentUser, influencer_id: int, data: InfluencerUpdate
+    db: DbSession, _: AdminUser, influencer_id: int, data: InfluencerUpdate
 ):
     influencer = InfluencerService.get_by_id(db, influencer_id)
     if not influencer:
@@ -111,7 +121,7 @@ def update_influencer(
 
 
 @router.delete("/{influencer_id}", response_model=ResponseBase[None])
-def delete_influencer(db: DbSession, _: CurrentUser, influencer_id: int):
+def delete_influencer(db: DbSession, _: AdminUser, influencer_id: int):
     influencer = InfluencerService.get_by_id(db, influencer_id)
     if not influencer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="达人不存在")
@@ -122,7 +132,7 @@ def delete_influencer(db: DbSession, _: CurrentUser, influencer_id: int):
 @router.post("/import", response_model=ResponseBase[ImportResult])
 async def import_influencers(
     db: DbSession,
-    _: CurrentUser,
+    _: AdminUser,
     file: UploadFile = File(...),
 ):
     if not file.filename or not file.filename.endswith((".xlsx", ".xls")):

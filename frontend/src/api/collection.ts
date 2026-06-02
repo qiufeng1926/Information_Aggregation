@@ -154,6 +154,13 @@ export function deletePlatformSession(platform: string) {
   return request.delete<any, ApiResponse<PlatformSessionStatus>>(`/collection/sessions/${platform}`)
 }
 
+export function importPlatformCookies(platform: string, content: string) {
+  return request.post<any, ApiResponse<PlatformSessionStatus>>(
+    `/collection/sessions/${platform}/import`,
+    { content }
+  )
+}
+
 export function getCollectionStats() {
   return request.get<any, ApiResponse<CollectionStats>>('/collection/stats')
 }

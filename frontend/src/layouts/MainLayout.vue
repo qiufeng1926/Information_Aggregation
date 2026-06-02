@@ -17,19 +17,27 @@
         </el-menu-item>
         <el-menu-item index="/influencers">
           <el-icon><User /></el-icon>
-          <span>达人库</span>
+          <span>{{ influencerMenuLabel }}</span>
         </el-menu-item>
-        <el-menu-item index="/tags">
+        <el-menu-item v-if="showAdminMenus" index="/tags">
           <el-icon><CollectionTag /></el-icon>
           <span>标签管理</span>
         </el-menu-item>
-        <el-menu-item index="/agencies">
+        <el-menu-item v-if="showAdminMenus" index="/agencies">
           <el-icon><OfficeBuilding /></el-icon>
           <span>MCN机构</span>
         </el-menu-item>
-        <el-menu-item index="/match">
+        <el-menu-item v-if="showAdminMenus" index="/match">
           <el-icon><Connection /></el-icon>
           <span>智能匹配</span>
+        </el-menu-item>
+        <el-menu-item v-if="showAccessReview" index="/access-review">
+          <el-icon><Stamp /></el-icon>
+          <span>{{ accessMenuLabel }}</span>
+        </el-menu-item>
+        <el-menu-item v-if="showUserManage" index="/users">
+          <el-icon><Setting /></el-icon>
+          <span>用户管理</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -38,6 +46,7 @@
       <el-header class="layout-header">
         <div class="header-title">{{ currentTitle }}</div>
         <div class="header-right">
+          <el-tag v-if="roleLabel" size="small" type="info">{{ roleLabel }}</el-tag>
           <span class="username">{{ userStore.userInfo?.nickname || userStore.userInfo?.username }}</span>
           <el-button link type="primary" @click="handleLogout">退出</el-button>
         </div>
@@ -53,6 +62,14 @@
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import {
+  ROLE_LABELS,
+  canManageUsers,
+  canReviewAccess,
+  canUseMatch,
+  isUser,
+  normalizeRole,
+} from '@/utils/permission'
 
 const route = useRoute()
 const router = useRouter()
@@ -65,10 +82,27 @@ const activeMenu = computed(() => {
   if (route.path.startsWith('/tags')) return '/tags'
   if (route.path.startsWith('/match')) return '/match'
   if (route.path.startsWith('/agencies')) return '/agencies'
+  if (route.path.startsWith('/users')) return '/users'
+  if (route.path.startsWith('/access-review')) return '/access-review'
   return route.path
 })
 
-const currentTitle = computed(() => (route.meta.title as string) || '达人信息聚合系统')
+const currentTitle = computed(() => {
+  if (route.path.startsWith('/influencers') && isUser(userStore.userInfo?.role)) {
+    return '我的达人'
+  }
+  return (route.meta.title as string) || '达人信息聚合系统'
+})
+
+const role = computed(() => normalizeRole(userStore.userInfo?.role))
+const roleLabel = computed(() => ROLE_LABELS[role.value] || role.value)
+const showAdminMenus = computed(() => canUseMatch(role.value))
+const showUserManage = computed(() => canManageUsers(role.value))
+const showAccessReview = computed(
+  () => canReviewAccess(role.value) || isUser(userStore.userInfo?.role)
+)
+const accessMenuLabel = computed(() => (isUser(userStore.userInfo?.role) ? '权限申请' : '权限审核'))
+const influencerMenuLabel = computed(() => (isUser(userStore.userInfo?.role) ? '我的达人' : '达人库'))
 
 onMounted(() => {
   userStore.fetchUserInfo()

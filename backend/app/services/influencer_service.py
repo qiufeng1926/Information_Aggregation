@@ -4,8 +4,9 @@ from typing import Any
 from openpyxl import load_workbook
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Influencer, InfluencerProfile, InfluencerTag
+from app.models import Influencer, InfluencerProfile, InfluencerTag, User
 from app.schemas import ImportResult, InfluencerCreate, InfluencerFilter, InfluencerUpdate
+from app.utils.access_control import can_view_full_library, influencer_ids_for_user
 
 PLATFORM_MAP = {
     "抖音": "douyin",
@@ -101,9 +102,19 @@ class InfluencerService:
 
     @staticmethod
     def list_influencers(
-        db: Session, filters: InfluencerFilter, page: int, page_size: int
+        db: Session,
+        filters: InfluencerFilter,
+        page: int,
+        page_size: int,
+        viewer: User | None = None,
     ) -> tuple[list[Influencer], int]:
         query = db.query(Influencer)
+
+        if viewer is not None and not can_view_full_library(viewer):
+            allowed_ids = influencer_ids_for_user(db, viewer.id)
+            if not allowed_ids:
+                return [], 0
+            query = query.filter(Influencer.id.in_(allowed_ids))
 
         if filters.platform:
             query = query.filter(Influencer.platform == filters.platform)

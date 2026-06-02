@@ -6,6 +6,11 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import User
+from app.utils.access_control import (
+    can_manage_users,
+    is_admin_or_above,
+    is_super_admin,
+)
 from app.utils.security import decode_access_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -27,11 +32,25 @@ def get_current_user(
     return user
 
 
+def get_super_admin_user(user: Annotated[User, Depends(get_current_user)]) -> User:
+    if not can_manage_users(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要超级管理员权限")
+    return user
+
+
 def get_admin_user(user: Annotated[User, Depends(get_current_user)]) -> User:
-    if user.role != "admin":
+    if not is_admin_or_above(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
+    return user
+
+
+def get_admin_user_legacy(user: Annotated[User, Depends(get_current_user)]) -> User:
+    """标签管理等沿用管理员及以上"""
+    if not is_admin_or_above(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
     return user
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+SuperAdminUser = Annotated[User, Depends(get_super_admin_user)]
 AdminUser = Annotated[User, Depends(get_admin_user)]

@@ -14,7 +14,7 @@ from app.schemas.match import (
     MatchSelectionUpdate,
 )
 from app.services.match_service import MatchService
-from app.utils.access_control import is_admin
+from app.utils.access_control import can_use_match
 
 router = APIRouter(prefix="/match", tags=["智能匹配"])
 
@@ -69,6 +69,8 @@ def _request_out(db, match_request: MatchRequest) -> MatchRequestOut:
 
 @router.post("/requests", response_model=ResponseBase[MatchRequestOut], status_code=status.HTTP_201_CREATED)
 def create_match_request(db: DbSession, user: CurrentUser, data: MatchRequestCreate):
+    if not can_use_match(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="普通用户无权使用智能匹配")
     try:
         match_request = MatchService.create_and_run(db, user.id, data)
     except Exception as exc:
@@ -86,7 +88,7 @@ def list_match_requests(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
-    items, total = MatchService.list_requests(db, user.id, is_admin(user), page, page_size)
+    items, total = MatchService.list_requests(db, user, page, page_size)
     return ResponseBase(
         data=PageResult(
             items=[_request_out(db, i) for i in items],
@@ -99,12 +101,12 @@ def list_match_requests(
 
 @router.get("/requests/{request_id}", response_model=ResponseBase[MatchRequestDetailOut])
 def get_match_request(db: DbSession, user: CurrentUser, request_id: int):
-    match_request = MatchService.get_request(db, request_id, user.id, is_admin(user))
+    match_request = MatchService.get_request(db, request_id, user)
     if not match_request:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="匹配需求不存在")
 
     top_results, _ = MatchService.list_results(
-        db, request_id, user.id, is_admin(user), page=1, page_size=5
+        db, request_id, user, page=1, page_size=5
     )
     out = MatchRequestDetailOut(
         **_request_out(db, match_request).model_dump(),
@@ -122,11 +124,11 @@ def list_match_results(
     page_size: int = Query(20, ge=1, le=100),
     selected_only: bool = False,
 ):
-    if not MatchService.get_request(db, request_id, user.id, is_admin(user)):
+    if not MatchService.get_request(db, request_id, user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="匹配需求不存在")
 
     items, total = MatchService.list_results(
-        db, request_id, user.id, is_admin(user), page, page_size, selected_only
+        db, request_id, user, page, page_size, selected_only
     )
     return ResponseBase(
         data=PageResult(
@@ -148,8 +150,7 @@ def update_match_selection(
     updated = MatchService.update_selection(
         db,
         request_id,
-        user.id,
-        is_admin(user),
+        user,
         data.result_ids,
         data.selected,
     )
@@ -165,7 +166,7 @@ def export_match_results(
     request_id: int,
     selected_only: bool = False,
 ):
-    buffer = MatchService.export_excel(db, request_id, user.id, is_admin(user), selected_only)
+    buffer = MatchService.export_excel(db, request_id, user, selected_only)
     if buffer is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="无可导出数据")
 
@@ -179,6 +180,6 @@ def export_match_results(
 
 @router.delete("/requests/{request_id}", response_model=ResponseBase[None])
 def delete_match_request(db: DbSession, user: CurrentUser, request_id: int):
-    if not MatchService.delete_request(db, request_id, user.id, is_admin(user)):
+    if not MatchService.delete_request(db, request_id, user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="匹配需求不存在")
     return ResponseBase(message="已删除")

@@ -8,6 +8,8 @@ from app.database import Base
 from app.models.collection import CollectedInfluencer, CollectionTask
 from app.models.match import MatchRequest, MatchResult
 
+from app.models.permission import SystemSetting, ViewAccessRequest
+
 __all__ = [
     "User",
     "Agency",
@@ -19,6 +21,8 @@ __all__ = [
     "CollectedInfluencer",
     "MatchRequest",
     "MatchResult",
+    "ViewAccessRequest",
+    "SystemSetting",
 ]
 
 
@@ -29,7 +33,8 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     nickname: Mapped[str | None] = mapped_column(String(100))
-    role: Mapped[str] = mapped_column(String(20), default="operator")
+    role: Mapped[str] = mapped_column(String(20), default="user")
+    view_library: Mapped[int] = mapped_column(default=0)
     status: Mapped[int] = mapped_column(default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

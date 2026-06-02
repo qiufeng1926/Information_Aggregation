@@ -28,6 +28,16 @@ def login(db: DbSession, request: Request, form_data: OAuth2PasswordRequestForm 
     return ResponseBase(data=Token(access_token=token))
 
 
+from app.utils.access_control import normalize_role
+
 @router.get("/me", response_model=ResponseBase[UserInfo])
 def get_me(current_user: User = Depends(get_current_user)):
-    return ResponseBase(data=UserInfo.model_validate(current_user))
+    return ResponseBase(
+        data=UserInfo(
+            id=current_user.id,
+            username=current_user.username,
+            nickname=current_user.nickname,
+            role=normalize_role(current_user.role),
+            view_library=bool(getattr(current_user, "view_library", False)),
+        )
+    )

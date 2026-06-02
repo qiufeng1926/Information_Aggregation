@@ -3,28 +3,21 @@ from io import BytesIO
 from openpyxl import Workbook
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Influencer, InfluencerTag, MatchRequest, MatchResult
+from app.models import Influencer, InfluencerTag, MatchRequest, MatchResult, User
 from app.schemas.match import MatchRequestCreate, MatchRequirements
 from app.services.match_engine import rank_influencers
+from app.utils.access_control import match_query_for_viewer
 
 
 class MatchService:
     @staticmethod
-    def _requests_query(db: Session, user_id: int, is_admin: bool):
-        query = db.query(MatchRequest)
-        if not is_admin:
-            query = query.filter(MatchRequest.user_id == user_id)
-        return query
-
-    @staticmethod
     def get_request(
         db: Session,
         request_id: int,
-        user_id: int,
-        is_admin: bool,
+        viewer: User,
     ) -> MatchRequest | None:
         return (
-            MatchService._requests_query(db, user_id, is_admin)
+            match_query_for_viewer(db, viewer)
             .filter(MatchRequest.id == request_id)
             .first()
         )
@@ -32,12 +25,11 @@ class MatchService:
     @staticmethod
     def list_requests(
         db: Session,
-        user_id: int,
-        is_admin: bool,
+        viewer: User,
         page: int,
         page_size: int,
     ) -> tuple[list[MatchRequest], int]:
-        query = MatchService._requests_query(db, user_id, is_admin).order_by(
+        query = match_query_for_viewer(db, viewer).order_by(
             MatchRequest.created_at.desc()
         )
         total = query.count()
@@ -125,13 +117,12 @@ class MatchService:
     def list_results(
         db: Session,
         request_id: int,
-        user_id: int,
-        is_admin: bool,
+        viewer: User,
         page: int,
         page_size: int,
         selected_only: bool = False,
     ) -> tuple[list[MatchResult], int]:
-        if not MatchService.get_request(db, request_id, user_id, is_admin):
+        if not MatchService.get_request(db, request_id, viewer):
             return [], 0
 
         query = (
@@ -156,12 +147,11 @@ class MatchService:
     def update_selection(
         db: Session,
         request_id: int,
-        user_id: int,
-        is_admin: bool,
+        viewer: User,
         result_ids: list[int],
         selected: bool,
     ) -> int:
-        if not MatchService.get_request(db, request_id, user_id, is_admin):
+        if not MatchService.get_request(db, request_id, viewer):
             return 0
 
         updated = (
@@ -187,11 +177,10 @@ class MatchService:
     def export_excel(
         db: Session,
         request_id: int,
-        user_id: int,
-        is_admin: bool,
+        viewer: User,
         selected_only: bool = False,
     ) -> BytesIO | None:
-        if not MatchService.get_request(db, request_id, user_id, is_admin):
+        if not MatchService.get_request(db, request_id, viewer):
             return None
 
         query = (
@@ -262,10 +251,9 @@ class MatchService:
     def delete_request(
         db: Session,
         request_id: int,
-        user_id: int,
-        is_admin: bool,
+        viewer: User,
     ) -> bool:
-        match_request = MatchService.get_request(db, request_id, user_id, is_admin)
+        match_request = MatchService.get_request(db, request_id, viewer)
         if not match_request:
             return False
         db.delete(match_request)

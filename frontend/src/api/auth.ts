@@ -10,6 +10,7 @@ export interface UserInfo {
   username: string
   nickname: string | null
   role: string
+  view_library?: boolean
 }
 
 export function login(username: string, password: string) {

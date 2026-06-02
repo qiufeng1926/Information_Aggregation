@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS users (
     username        VARCHAR(50) NOT NULL UNIQUE,
     password_hash   VARCHAR(255) NOT NULL,
     nickname        VARCHAR(100),
-    role            VARCHAR(20) DEFAULT 'operator',
+    role            VARCHAR(20) DEFAULT 'user',
+    view_library    TINYINT DEFAULT 0,
     status          TINYINT DEFAULT 1,
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -156,3 +157,26 @@ CREATE TABLE IF NOT EXISTS collected_influencers (
     CONSTRAINT fk_collected_task FOREIGN KEY (task_id) REFERENCES collection_tasks(id) ON DELETE CASCADE,
     CONSTRAINT fk_collected_influencer FOREIGN KEY (influencer_id) REFERENCES influencers(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS view_access_requests (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id         BIGINT NOT NULL,
+    status          VARCHAR(20) DEFAULT 'pending',
+    reason          TEXT,
+    reviewer_id     BIGINT,
+    review_note     TEXT,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at     DATETIME,
+    KEY idx_var_user (user_id),
+    KEY idx_var_status (status),
+    CONSTRAINT fk_var_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT fk_var_reviewer FOREIGN KEY (reviewer_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS system_settings (
+    `key`           VARCHAR(100) PRIMARY KEY,
+    value           VARCHAR(500) NOT NULL,
+    updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO system_settings (`key`, value) VALUES ('block_upper_role_tasks', 'true');
